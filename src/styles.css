@@ -1151,8 +1151,9 @@ button {
   inset: 0;
   background: rgba(5, 8, 14, 0.55);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding-top: max(24px, 7vh);
   z-index: 100;
   animation: fade 0.12s ease-out;
 }
@@ -1163,7 +1164,7 @@ button {
 }
 .modal {
   width: min(680px, calc(100vw - 40px));
-  max-height: calc(100vh - 60px);
+  max-height: calc(100vh - max(48px, 14vh));
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;

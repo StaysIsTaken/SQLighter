@@ -254,3 +254,30 @@ export function AboutDialog() {
     </Modal>
   )
 }
+
+export function PasswordPrompt({ title, label, onDone }: { title: string; label: string; onDone: (pw: string | null) => void }) {
+  const [v, setV] = useState('')
+  return (
+    <Modal
+      title={title}
+      size="narrow"
+      icon={<KeyRound size={18} />}
+      onClose={() => onDone(null)}
+      footer={
+        <>
+          <button className="btn" onClick={() => onDone(null)}>
+            {t('Cancel')}
+          </button>
+          <button className="btn primary" onClick={() => onDone(v)}>
+            {t('Connect')}
+          </button>
+        </>
+      }
+    >
+      <div className="field">
+        <label>{label}</label>
+        <input className="input" autoFocus type="password" value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && onDone(v)} />
+      </div>
+    </Modal>
+  )
+}

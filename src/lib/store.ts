@@ -87,6 +87,8 @@ interface State {
   tasks: Record<string, ProgressEvent>
   hostKeyPrompts: HostKeyPrompt[]
   approvals: ApprovalRequest[]
+  /** Password prompts are layered above dialogs so they never replace an open dialog. */
+  passwordPrompts: { id: number; title: string; label: string; resolve: (pw: string | null) => void }[]
 
   loadSettings: () => Promise<void>
   loadTree: () => Promise<void>
@@ -147,6 +149,7 @@ export const useStore = create<State>((set, get) => ({
   tasks: {},
   hostKeyPrompts: [],
   approvals: [],
+  passwordPrompts: [],
 
   loadSettings: async () => {
     set({ settings: await api.getSettings() })
@@ -177,17 +180,16 @@ export const useStore = create<State>((set, get) => ({
     }
     const needsPassword = c.type !== 'sqlite' && !c.hasPassword && !c.savePassword
     if (needsPassword) {
-      return new Promise<boolean>((resolve) => {
-        set({
-          dialog: {
-            type: 'prompt',
-            title: t('Connect to {name}', { name: c.name }),
-            label: t('Password for {user}', { user: c.user || '' }),
-            password: true,
-            onSubmit: async (pw) => resolve(await doConnect(pw))
-          }
-        })
-      })
+      const pw = await new Promise<string | null>((resolve) =>
+        set((st) => ({
+          passwordPrompts: [
+            ...st.passwordPrompts,
+            { id: ++toastId, title: t('Connect to {name}', { name: c.name }), label: t('Password for {user}', { user: c.user || '' }), resolve }
+          ]
+        }))
+      )
+      if (pw === null) return false
+      return doConnect(pw)
     }
     return doConnect()
   },

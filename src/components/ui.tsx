@@ -4,6 +4,10 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import type { DbType } from '@shared/types'
 
+// Only the top-most modal reacts to Escape.
+const modalStack: number[] = []
+let modalSeq = 0
+
 export function Modal(props: {
   title: ReactNode
   onClose: () => void
@@ -13,16 +17,24 @@ export function Modal(props: {
   icon?: ReactNode
   tabs?: ReactNode
 }) {
+  const [id] = useState(() => ++modalSeq)
+  const onClose = useRef(props.onClose)
+  onClose.current = props.onClose
   useEffect(() => {
+    modalStack.push(id)
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && modalStack[modalStack.length - 1] === id) {
         e.stopPropagation()
-        props.onClose()
+        onClose.current()
       }
     }
     window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [props])
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      const i = modalStack.indexOf(id)
+      if (i >= 0) modalStack.splice(i, 1)
+    }
+  }, [id])
   return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && props.onClose()}>
       <div className={`modal ${props.size ?? ''}`} role="dialog" aria-modal="true">

@@ -312,6 +312,17 @@ async fn sqlite() {
     exec(&s, "CREATE TRIGGER it_trg AFTER INSERT ON it_orders BEGIN UPDATE it_users SET score = 1 WHERE id = NEW.user_id; END; INSERT INTO it_orders VALUES (10, 2, 1);").await;
     let r = exec(&s, "SELECT score FROM it_users WHERE id = 2").await;
     assert_eq!(r.results[0].rows[0][0], Value::from(1));
+    // UNIQUE constraints produce internal auto-indexes that must not leak into generated DDL
+    exec(&s, "CREATE TABLE it_u (id INTEGER PRIMARY KEY, email TEXT UNIQUE)").await;
+    {
+        let mut g = s.meta().await.unwrap();
+        let info = metadata::describe(g.as_mut().unwrap(), Dialect::Sqlite, "main", "it_u", ObjectKind::Table).await.unwrap();
+        assert!(info.indexes.iter().all(|i| !i.name.starts_with("sqlite_")), "{:?}", info.indexes);
+        let c = g.as_mut().unwrap();
+        for st in sqlgen::create_table(&info, Dialect::Sqlite, &sqlgen::CreateOpts { to: Dialect::Sqlite, schema: "main", name: "it_u2", foreign_keys: true, indexes: true }) {
+            c.run(&st, 0).await.unwrap_or_else(|e| panic!("{st}: {e:#}"));
+        }
+    }
     // Backup API
     let bak = path.with_extension("bak.db");
     if let sqlighter_lib::db::Conn::Lite(l) = s.new_conn().await.unwrap() {

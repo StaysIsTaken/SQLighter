@@ -30,7 +30,7 @@ import { ConnectionDialog } from '@/components/dialogs/ConnectionDialog'
 import { GenerateDialog } from '@/components/dialogs/GenerateDialog'
 import { BackupDialog, ExportDialog, ImportDialog, RestoreDialog, TransferDialog } from '@/components/dialogs/IoDialogs'
 import { SettingsDialog } from '@/components/dialogs/SettingsDialog'
-import { AboutDialog, ApprovalDialog, ConfirmDialog, HistoryDialog, HostKeyDialog, PromptDialog, ValueDialog } from '@/components/dialogs/SmallDialogs'
+import { AboutDialog, ApprovalDialog, ConfirmDialog, HistoryDialog, HostKeyDialog, PasswordPrompt, PromptDialog, ValueDialog } from '@/components/dialogs/SmallDialogs'
 
 export function App() {
   const s = useStore()
@@ -264,6 +264,18 @@ export function App() {
       )}
 
       <DialogHost />
+      {s.passwordPrompts[0] && (
+        <PasswordPrompt
+          key={s.passwordPrompts[0].id}
+          title={s.passwordPrompts[0].title}
+          label={s.passwordPrompts[0].label}
+          onDone={(pw) => {
+            const p = useStore.getState().passwordPrompts[0]
+            useStore.setState((st) => ({ passwordPrompts: st.passwordPrompts.slice(1) }))
+            p?.resolve(pw)
+          }}
+        />
+      )}
       {s.hostKeyPrompts[0] && <HostKeyDialog prompt={s.hostKeyPrompts[0]} onDone={() => useStore.setState((st) => ({ hostKeyPrompts: st.hostKeyPrompts.slice(1) }))} />}
       {!s.hostKeyPrompts[0] && s.approvals[0] && <ApprovalDialog req={s.approvals[0]} onDone={() => useStore.setState((st) => ({ approvals: st.approvals.slice(1) }))} />}
     </div>

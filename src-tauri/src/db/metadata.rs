@@ -346,9 +346,12 @@ pub async fn describe(c: &mut Conn, d: Dialect, schema: &str, name: &str, kind: 
             for r in idx {
                 let iname = cell_str(&r[0]);
                 let cols = c.rows(&format!("SELECT name FROM pragma_index_info({}, {s}) ORDER BY seqno", lit(&iname, d))).await?;
+                let cols: Vec<String> = cols.iter().map(|x| cell_str(&x[0])).collect();
+                // Indexes created implicitly for UNIQUE constraints have reserved names.
+                let iname = if iname.starts_with("sqlite_autoindex_") { format!("{}_{}_key", name, cols.join("_")) } else { iname };
                 t.indexes.push(IndexInfo {
                     name: iname,
-                    columns: cols.iter().map(|x| cell_str(&x[0])).collect(),
+                    columns: cols,
                     unique: cell_bool(&r[1]),
                     primary: cell_str(&r[2]) == "pk",
                 });
