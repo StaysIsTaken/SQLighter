@@ -426,3 +426,63 @@ async fn postgres_tls_modes() {
     let e = Session::open(c, secrets(DbType::Postgres), no_prompt(), true).await.err().unwrap();
     assert!(format!("{e:#}").contains("CHANGED"), "{e:#}");
 }
+
+/// SSH tunnel with host key verification against a real sshd.
+/// Run with SQLIGHTER_SSH_KEY=<private key> (and optionally SQLIGHTER_SSH_PORT, SQLIGHTER_SSH_USER).
+#[tokio::test]
+async fn ssh_tunnel_host_key_verification() {
+    let Ok(key) = std::env::var("SQLIGHTER_SSH_KEY") else { return };
+    sqlighter_lib::tls::install_default_provider();
+    let ssh = |fp: Option<String>| SshConfig {
+        enabled: true,
+        host: "127.0.0.1".into(),
+        port: env("SQLIGHTER_SSH_PORT", "2222").parse().unwrap(),
+        user: env("SQLIGHTER_SSH_USER", "root"),
+        auth: SshAuth::Key,
+        key_file: Some(key.clone()),
+        host_key_fingerprint: fp,
+    };
+    let seen: Arc<std::sync::Mutex<Vec<HostKeyPrompt>>> = Default::default();
+    let prompt = |accept: bool| -> sqlighter_lib::ssh::PromptFn {
+        let seen = seen.clone();
+        Arc::new(move |p: HostKeyPrompt| {
+            seen.lock().unwrap().push(p);
+            Box::pin(async move { accept })
+        })
+    };
+
+    // 1. Unknown host key: the user is asked (TOFU); accepting returns the fingerprint to store.
+    let mut c = cfg(DbType::Postgres);
+    c.host = "127.0.0.1".into();
+    c.ssh = ssh(None);
+    let (s, fp) = Session::open(c.clone(), secrets(DbType::Postgres), prompt(true), true).await.expect("tunnel with TOFU");
+    let fp = fp.expect("new fingerprint to persist");
+    assert!(fp.starts_with("SHA256:"), "{fp}");
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    assert!(seen.lock().unwrap()[0].previous.is_none());
+    exec(&s, "SELECT 1").await;
+    s.close().await;
+
+    // 2. Known key: no prompt.
+    c.ssh = ssh(Some(fp.clone()));
+    let (s, newfp) = Session::open(c.clone(), secrets(DbType::Postgres), prompt(false), true).await.expect("tunnel with known key");
+    assert!(newfp.is_none());
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    s.close().await;
+
+    // 3. Changed key (simulated MITM): the user is warned with the previous key; rejecting aborts.
+    c.ssh = ssh(Some("SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into()));
+    let e = Session::open(c.clone(), secrets(DbType::Postgres), prompt(false), true).await.err().expect("must be rejected");
+    assert!(format!("{e:#}").contains("man-in-the-middle"), "{e:#}");
+    let last = seen.lock().unwrap().last().cloned().unwrap();
+    assert!(last.previous.is_some());
+
+    // 4. MySQL/MariaDB through the tunnel (loopback port forwarding).
+    let mut m = cfg(DbType::Mariadb);
+    m.host = "127.0.0.1".into();
+    m.ssh = ssh(Some(fp));
+    let (s, _) = Session::open(m, secrets(DbType::Mariadb), prompt(false), true).await.expect("mariadb through tunnel");
+    let r = exec(&s, "SELECT 40 + 2").await;
+    assert_eq!(r.results[0].rows[0][0], Value::from(42));
+    s.close().await;
+}
