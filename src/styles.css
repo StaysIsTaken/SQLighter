@@ -107,6 +107,7 @@ body {
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -168,6 +169,7 @@ button {
   white-space: nowrap;
 }
 .selectable {
+  -webkit-user-select: text;
   user-select: text;
 }
 
@@ -382,6 +384,7 @@ button {
   background: var(--bg);
   color: var(--text);
   outline: none;
+  -webkit-user-select: text;
   user-select: text;
 }
 .textarea {
@@ -716,6 +719,9 @@ button {
 .toolbar::-webkit-scrollbar {
   display: none;
 }
+.toolbar .input {
+  min-width: 160px;
+}
 .toolbar .select {
   width: auto;
   max-width: 220px;
@@ -842,11 +848,14 @@ button {
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
+  -webkit-user-select: text;
   user-select: text;
 }
 
 /* grid */
 .grid {
+  -webkit-user-select: none;
+  user-select: none;
   flex: 1;
   position: relative;
   overflow: auto;
@@ -1000,6 +1009,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  -webkit-user-select: text;
   user-select: text;
 }
 .msg {
@@ -1102,6 +1112,7 @@ button {
   padding: 9px 11px;
   outline: none;
   line-height: 1.45;
+  -webkit-user-select: text;
   user-select: text;
 }
 .chat-input textarea:focus {
@@ -1118,6 +1129,7 @@ button {
   flex-direction: column;
   gap: 10px;
   align-items: center;
+  -webkit-user-select: none;
   user-select: none;
 }
 .suggestion {
@@ -1204,6 +1216,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  -webkit-user-select: text;
   user-select: text;
 }
 .modal-foot {
@@ -1348,6 +1361,7 @@ button {
   font-size: 12.5px;
   line-height: 1.45;
   animation: pop 0.15s ease-out;
+  -webkit-user-select: text;
   user-select: text;
   word-break: break-word;
 }
@@ -1419,6 +1433,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  -webkit-user-select: text;
   user-select: text;
 }
 .structure h3 {
@@ -1461,6 +1476,7 @@ button {
   border-radius: var(--radius-sm);
   background: var(--bg-2);
   border: 1px solid var(--border);
+  -webkit-user-select: all;
   user-select: all;
 }
 .value-view {

@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx vite build
+
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sqltest
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: sqltest
+          MARIADB_USER: tester
+          MARIADB_PASSWORD: secret
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libsoup-3.0-dev libxdo-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Placeholder frontend build output
+        run: mkdir -p dist && echo '<!doctype html><title>ci</title>' > dist/index.html
+      - name: Grant test user privileges
+        run: |
+          docker exec ${{ job.services.mariadb.id }} mariadb -uroot -proot -e "GRANT ALL ON *.* TO 'tester'@'%'; FLUSH PRIVILEGES;"
+      - name: Unit and protocol tests
+        working-directory: src-tauri
+        env:
+          SQLIGHTER_NO_KEYRING: '1'
+        run: |
+          cargo test --lib
+          cargo test --test ai_providers
+      - name: Integration tests (PostgreSQL, MariaDB, SQLite)
+        working-directory: src-tauri
+        env:
+          SQLIGHTER_IT: '1'
+          SQLIGHTER_NO_KEYRING: '1'
+        run: cargo test --test integration -- --test-threads=1

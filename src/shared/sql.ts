@@ -230,6 +230,8 @@ export function isHexBinary(v: unknown): boolean {
   return typeof v === 'string' && v.startsWith(HEX_PREFIX) && /^\\x[0-9a-f]*$/i.test(v)
 }
 
+const NUMERIC_TYPE = /^(int|integer|smallint|bigint|tinyint|mediumint|int2|int4|int8|serial|bigserial|numeric|decimal|number|real|float|double|money|dec)\b/
+
 export function quoteLiteral(value: CellValue | undefined, dialect: Dialect, dataType?: string): string {
   if (value === null || value === undefined) return 'NULL'
   if (typeof value === 'boolean') {
@@ -253,6 +255,12 @@ export function quoteLiteral(value: CellValue | undefined, dialect: Dialect, dat
       default:
         return `X'${hex}'`
     }
+  }
+  // Values edited in the grid arrive as text: keep numbers/booleans typed for their columns.
+  if (NUMERIC_TYPE.test(type) && /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/.test(value.trim())) return value.trim()
+  if (/^(bool|boolean)$/.test(type) && /^(true|false)$/i.test(value.trim())) {
+    const b = value.trim().toLowerCase() === 'true'
+    return dialect === 'postgres' ? (b ? 'TRUE' : 'FALSE') : b ? '1' : '0'
   }
   let s = value.replace(/'/g, "''")
   if (dialect === 'mysql') s = s.replace(/\\/g, '\\\\')
