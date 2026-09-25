@@ -587,3 +587,23 @@ pub async fn ddl(c: &mut Conn, d: Dialect, schema: &str, name: &str, kind: Objec
     }
     Ok(out)
 }
+
+/// (table, column, type) for all tables and views of a schema, used for AI context.
+pub async fn schema_columns(c: &mut Conn, d: Dialect, schema: &str) -> Result<Vec<(String, String, String)>> {
+    let s = lit(schema, d);
+    let sql = match d {
+        Dialect::Postgres => format!(
+            "SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod) FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid \
+             JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = {s} AND c.relkind IN ('r','p','v','m','f') AND a.attnum > 0 AND NOT a.attisdropped \
+             ORDER BY c.relname, a.attnum"
+        ),
+        Dialect::Mysql => format!("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = {s} ORDER BY TABLE_NAME, ORDINAL_POSITION"),
+        Dialect::Sqlite => format!(
+            "SELECT m.name, p.name, p.type FROM {q}.sqlite_master m JOIN pragma_table_info(m.name, {s}) p WHERE m.type IN ('table','view') AND m.name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY m.name, p.cid",
+            q = quote_ident(schema, d)
+        ),
+        Dialect::Mssql => format!("SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = {s} ORDER BY TABLE_NAME, ORDINAL_POSITION"),
+        Dialect::Oracle => format!("SELECT table_name, column_name, data_type FROM all_tab_columns WHERE owner = {s} ORDER BY table_name, column_id"),
+    };
+    Ok(c.rows(&sql).await.context("read schema")?.iter().map(|r| (cell_str(&r[0]), cell_str(&r[1]), cell_str(&r[2]))).collect())
+}
