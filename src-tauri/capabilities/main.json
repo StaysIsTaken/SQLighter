@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Capabilities of the main window. SQLighter uses its own commands for file access (restricted to files picked in native dialogs); no filesystem, shell or HTTP plugin is exposed to the web view.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
