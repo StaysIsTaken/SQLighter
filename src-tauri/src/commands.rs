@@ -278,6 +278,19 @@ pub async fn get_ddl(state: S<'_>, connection_id: String, schema: String, name: 
     Ok(metadata::ddl(g.as_mut().unwrap(), d, &schema, &name, kind).await?)
 }
 
+/// Table -> columns map for editor auto-completion.
+#[tauri::command]
+pub async fn completion_schema(state: S<'_>, connection_id: String, schema: String) -> AppResult<std::collections::BTreeMap<String, Vec<String>>> {
+    let s = state.session(&connection_id).await?;
+    let d = s.dialect();
+    let mut g = s.meta().await?;
+    let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for (t, c, _) in metadata::schema_columns(g.as_mut().unwrap(), d, &schema).await? {
+        out.entry(t).or_default().push(c);
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 pub async fn table_data(state: S<'_>, request: TableDataRequest) -> AppResult<QueryResult> {
     let s = state.session(&request.connection_id).await?;

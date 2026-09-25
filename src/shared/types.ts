@@ -220,7 +220,7 @@ export interface RowChange {
 export interface TableDataRequest {
   connectionId: string
   table: TableRef
-  where?: string
+  whereClause?: string
   orderBy?: { column: string; desc: boolean }[]
   limit: number
   offset: number
@@ -253,6 +253,15 @@ export interface ImportPreview {
   rows: CellValue[][]
   totalRows: number
   sheets?: string[]
+}
+
+export interface ImportSourceOptions {
+  format: ImportFormat
+  filePath: string
+  delimiter?: string
+  hasHeader?: boolean
+  sheet?: string
+  xmlRowTag?: string
 }
 
 export interface ImportOptions {
@@ -370,6 +379,23 @@ export type ChatEvent =
 export type Theme = 'system' | 'dark' | 'light'
 export type Language = 'system' | 'en' | 'de'
 
+export interface TestResult {
+  serverVersion: string
+  hostKeyFingerprint?: string | null
+}
+
+export interface ClaudeInfo {
+  path: string
+  version: string
+}
+
+export interface NativeTools {
+  pgDump?: string | null
+  pgRestore?: string | null
+  mysqldump?: string | null
+  mariadbDump?: string | null
+}
+
 export interface Settings {
   theme: Theme
   language: Language
@@ -421,7 +447,7 @@ export interface HostKeyPrompt {
   previous?: string
 }
 
-export interface CertPrompt {
+export interface CertInfo {
   host: string
   port: number
   fingerprint: string

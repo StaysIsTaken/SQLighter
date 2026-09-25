@@ -226,7 +226,7 @@ export function qualifiedName(schema: string | undefined | null, name: string, d
 const HEX_PREFIX = '\\x'
 
 /** Binary values are transported as "\x..." hex strings; see normalizeValue in the main process. */
-export function isHexBinary(v: unknown): v is string {
+export function isHexBinary(v: unknown): boolean {
   return typeof v === 'string' && v.startsWith(HEX_PREFIX) && /^\\x[0-9a-f]*$/i.test(v)
 }
 

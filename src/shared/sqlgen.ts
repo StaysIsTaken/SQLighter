@@ -201,8 +201,8 @@ export function typeCategory(dataType: string | undefined): TypeCategory {
   if (/^(timestamp|datetime|smalldatetime|datetime2)/.test(t)) return 'timestamp'
   if (/^date$/.test(t)) return 'date'
   if (/^time/.test(t)) return 'time'
-  if (/^(char|nchar|character\b(?! varying)|bpchar)/.test(t)) return 'char'
   if (/^(varchar|nvarchar|character varying|varchar2|nvarchar2|string)/.test(t)) return /\(max\)/.test(t) ? 'text' : 'varchar'
+  if (/^(char|nchar|character|bpchar)\b/.test(t)) return 'char'
   if (/text|clob|citext|xml|ntext|long/.test(t)) return 'text'
   return 'other'
 }

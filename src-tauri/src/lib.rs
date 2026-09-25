@@ -45,6 +45,12 @@ pub fn run() {
                     matches!(url.scheme(), "tauri" | "asset") || matches!(url.host_str(), Some("localhost") | Some("tauri.localhost") | Some("127.0.0.1"))
                 })
                 .build()?;
+            #[cfg(debug_assertions)]
+            if std::env::var("SQLIGHTER_DEVTOOLS").is_ok() {
+                if let Some(w) = app.get_webview_window("main") {
+                    w.open_devtools();
+                }
+            }
             tauri::async_runtime::spawn(async move {
                 if let Err(e) = mcp::apply_settings(state).await {
                     log::error!("MCP server: {e:#}");
@@ -79,6 +85,7 @@ pub fn run() {
             commands::list_objects,
             commands::describe_table,
             commands::get_ddl,
+            commands::completion_schema,
             commands::table_data,
             commands::apply_changes,
             commands::get_history,
