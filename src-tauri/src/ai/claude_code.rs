@@ -43,6 +43,22 @@ pub fn resolve(command: Option<&str>) -> Result<PathBuf> {
     candidates.into_iter().find(|p| p.exists()).context("Claude Code CLI not found. Install it (https://code.claude.com) or set its path in Settings → AI.")
 }
 
+/// Whether this CLI supports `--tools` (disables every built-in tool; newer versions).
+async fn supports_tools_flag(bin: &PathBuf) -> bool {
+    static CACHE: std::sync::Mutex<Option<(PathBuf, bool)>> = std::sync::Mutex::new(None);
+    if let Some((p, v)) = CACHE.lock().unwrap().as_ref() {
+        if p == bin {
+            return *v;
+        }
+    }
+    let v = match command(bin).arg("--help").output().await {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).contains("--tools"),
+        Err(_) => false,
+    };
+    *CACHE.lock().unwrap() = Some((bin.clone(), v));
+    v
+}
+
 pub async fn version(bin: &PathBuf) -> Result<String> {
     let out = command(bin).arg("--version").output().await?;
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
@@ -94,6 +110,10 @@ pub async fn chat(state: Arc<AppState>, p: &AiProviderConfig, system: String, co
         .arg("--strict-mcp-config")
         .arg("--disallowedTools")
         .arg(DISALLOWED);
+    if supports_tools_flag(&bin).await {
+        // No built-in tools at all: Claude Code only sees SQLighter's MCP tools.
+        cmd.arg("--tools").arg("");
+    }
     if !allowed.is_empty() {
         cmd.arg("--allowedTools").arg(allowed.join(","));
     }

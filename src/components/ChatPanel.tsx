@@ -148,7 +148,11 @@ export function ChatPanel() {
     }
     if (mode === 'insert') ed.insert(sql)
     else if (mode === 'replace') ed.replace(sql)
-    else ed.run(sql)
+    else {
+      // Show what runs: an empty editor receives the statement first.
+      if (!ed.getSql().trim()) ed.replace(sql)
+      ed.run(sql)
+    }
   }
 
   const accessLabel = settings?.aiAccess === 'none' ? t('no database access') : settings?.aiAccess === 'read' ? t('schema + read-only queries') : t('schema only')

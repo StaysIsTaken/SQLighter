@@ -175,7 +175,8 @@ button {
 
 .app {
   display: grid;
-  grid-template-rows: 44px 1fr 26px;
+  grid-template-rows: 44px minmax(0, 1fr) 26px;
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
 }
 
@@ -184,6 +185,8 @@ button {
   align-items: center;
   gap: 6px;
   padding: 0 10px;
+  min-width: 0;
+  overflow: hidden;
   background: var(--bg-2);
   border-bottom: 1px solid var(--border);
 }
@@ -205,6 +208,7 @@ button {
 .main {
   display: flex;
   min-height: 0;
+  min-width: 0;
 }
 
 .sidebar,
@@ -706,6 +710,11 @@ button {
   background: var(--panel);
   flex: none;
   min-height: 42px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.toolbar::-webkit-scrollbar {
+  display: none;
 }
 .toolbar .select {
   width: auto;
