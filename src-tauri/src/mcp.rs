@@ -190,6 +190,7 @@ async fn handle(AxState((state, port)): AxState<(Arc<AppState>, u16)>, headers: 
                 allow_write: st.mcp_allow_write,
                 allow_open_editor: true,
                 label: "MCP client".into(),
+                schema: None,
             }
         }
     };

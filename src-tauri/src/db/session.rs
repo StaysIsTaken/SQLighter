@@ -264,14 +264,28 @@ impl Session {
     }
 
     /// Runs a single read-only query inside a READ ONLY transaction that is always rolled back.
-    pub async fn read_only_query(&self, stmt: &str, max_rows: usize) -> Result<QueryResult> {
+    /// Runs one read-only statement in a READ ONLY transaction that is always rolled back.
+    /// `schema` sets the default for unqualified names.
+    pub async fn read_only_query(&self, stmt: &str, max_rows: usize, schema: Option<&str>) -> Result<QueryResult> {
         let stmts = sql::split_statements(stmt, self.dialect());
         if stmts.len() != 1 || !sql::is_read_only(&stmts[0]) {
             bail!("Only a single read-only statement (SELECT/WITH/SHOW/EXPLAIN) is allowed");
         }
+        let d = self.dialect();
+        let switch = schema.and_then(|s| use_schema_sql(d, s));
         let mut g = self.meta().await?;
         let c = g.as_mut().unwrap();
+        // PostgreSQL: inside the transaction, so the rollback restores the search_path.
+        if let Some(sw) = switch.as_deref().filter(|_| d != Dialect::Postgres) {
+            c.run(sw, 1).await?;
+        }
         c.begin_read_only().await?;
+        if let Some(sw) = switch.as_deref().filter(|_| d == Dialect::Postgres) {
+            if let Err(e) = c.run(sw, 1).await {
+                let _ = c.end_read_only().await;
+                return Err(e);
+            }
+        }
         let start = Instant::now();
         let r = tokio::time::timeout(Duration::from_secs(60), c.run(&stmts[0], max_rows)).await.unwrap_or_else(|_| Err(anyhow!("query timed out")));
         let _ = c.end_read_only().await;

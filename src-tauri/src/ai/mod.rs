@@ -44,6 +44,9 @@ impl Emit {
     pub fn tool(&self, name: &str, detail: &str) {
         self.send(ChatEventKind::Tool { name: name.to_string(), detail: detail.chars().take(300).collect() });
     }
+    pub fn notice(&self, code: &str) {
+        self.send(ChatEventKind::Notice { code: code.to_string() });
+    }
     pub fn session(&self, id: &str) {
         self.send(ChatEventKind::Session { session_id: id.to_string() });
     }
@@ -131,11 +134,13 @@ async fn run_chat(state: Arc<AppState>, access: AiAccessLevel, p: AiProviderConf
         None => (None, String::new()),
     };
     let access = if conn_id.is_some() { access } else { AiAccessLevel::None };
-    let scope = tools::Scope { connection_id: conn_id.clone(), access, allow_write: false, allow_open_editor: false, label: format!("AI chat ({})", p.name) };
+    let scope = tools::Scope { connection_id: conn_id.clone(), access, allow_write: false, allow_open_editor: false, label: format!("AI chat ({})", p.name), schema: req.schema.clone().filter(|x| !x.is_empty()) };
     let has_tools = access != AiAccessLevel::None;
     let mut context = String::new();
     if let (Some(id), true) = (&conn_id, access != AiAccessLevel::None) {
-        match tools::schema_context(&state, id, req.schema.as_deref()).await {
+        // Local models usually run with a small context window: keep the overview compact there.
+        let budget = if p.kind == AiProviderKind::Ollama { 10_000 } else { 24_000 };
+        match tools::schema_context(&state, id, req.schema.as_deref(), budget).await {
             Ok(s) => context.push_str(&format!("Connection: {conn_name}\n{s}\n")),
             Err(e) => context.push_str(&format!("(schema not available: {})\n", crate::error::chain_message(&e))),
         }

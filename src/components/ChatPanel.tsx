@@ -1,6 +1,6 @@
 // AI assistant panel.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bot, Check, ClipboardCopy, CornerDownLeft, FilePlus2, Play, Plus, Replace, Send, Settings2, ShieldCheck, Square, Wrench, X } from 'lucide-react'
+import { AlertTriangle, Bot, Check, ClipboardCopy, CornerDownLeft, FilePlus2, Play, Plus, Replace, Send, Settings2, ShieldCheck, Square, Wrench, X } from 'lucide-react'
 import type { ChatEvent, ChatMessage } from '@shared/types'
 import { api, errorMessage, events } from '@/lib/api'
 import { copyText } from '@/lib/format'
@@ -11,6 +11,13 @@ import { Markdown } from './Markdown'
 interface UiMessage extends ChatMessage {
   tools?: { name: string; detail: string }[]
   error?: string
+  notices?: string[]
+}
+
+function noticeText(code: string): string {
+  if (code === 'context-overflow')
+    return t('The conversation is too long for this local model: the beginning (instructions, your question) may be cut off. Start a new chat, ask more specifically, or use a model with a larger context window.')
+  return code
 }
 
 // Lets other components prefill the chat ("Ask AI").
@@ -87,6 +94,7 @@ export function ChatPanel() {
         if (e.type === 'text') last.content += e.text
         else if (e.type === 'tool') last.tools = [...(last.tools ?? []), { name: e.name, detail: e.detail }]
         else if (e.type === 'error') last.error = e.error
+        else if (e.type === 'notice') last.notices = [...(last.notices ?? []), e.code]
         copy[copy.length - 1] = last
         return copy
       })
@@ -229,6 +237,12 @@ export function ChatPanel() {
             </div>
           ) : (
             <div key={i} className={`msg assistant ${requestId && i === messages.length - 1 && !m.content ? 'cursor-blink' : ''}`}>
+              {m.notices?.map((n) => (
+                <div key={n} className="callout warn small" style={{ marginBottom: 6 }}>
+                  <AlertTriangle size={14} />
+                  <span>{noticeText(n)}</span>
+                </div>
+              ))}
               {m.tools?.map((tl, j) => (
                 <div key={j} className="tool-chip" title={tl.detail}>
                   <Wrench size={11} /> {tl.name}

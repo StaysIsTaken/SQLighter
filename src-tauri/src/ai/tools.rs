@@ -21,6 +21,8 @@ pub struct Scope {
     /// May open SQL in a new editor tab.
     pub allow_open_editor: bool,
     pub label: String,
+    /// Schema / database selected in SQLighter; default for unqualified names.
+    pub schema: Option<String>,
 }
 
 pub struct ToolDef {
@@ -54,8 +56,8 @@ pub fn definitions(scope: &Scope) -> Vec<ToolDef> {
     }
     out.push(ToolDef {
         name: "list_tables",
-        description: "List tables and views of a schema. Without schema the default schema is used.",
-        schema: conn_prop(json!({"type": "object", "properties": {"schema": {"type": "string"}}, "required": []})),
+        description: "List tables and views of a schema (default: the schema/database selected in SQLighter). Use 'filter' to search table names (case-insensitive substring).",
+        schema: conn_prop(json!({"type": "object", "properties": {"schema": {"type": "string"}, "filter": {"type": "string", "description": "Only tables whose name contains this text"}}, "required": []})),
     });
     out.push(ToolDef {
         name: "describe_table",
@@ -103,6 +105,19 @@ fn resolve_connection(state: &AppState, scope: &Scope, args: &Value) -> Result<S
         .with_context(|| format!("unknown connection '{want}'"))
 }
 
+/// Explicit argument, else the schema selected in SQLighter, else the connection's default.
+async fn resolve_schema(c: &mut crate::db::Conn, d: crate::model::Dialect, scope: &Scope, explicit: Option<&str>) -> Result<String> {
+    if let Some(x) = explicit.or(scope.schema.as_deref()).map(str::trim).filter(|x| !x.is_empty()) {
+        return Ok(x.to_string());
+    }
+    let def = metadata::default_schema(c, d).await?;
+    if !def.is_empty() {
+        return Ok(def);
+    }
+    let all = metadata::schemas(c, d).await.unwrap_or_default();
+    bail!("No schema/database is selected for this connection. Pass the 'schema' parameter. Available: {}", all.join(", "))
+}
+
 pub async fn call(state: &Arc<AppState>, scope: &Scope, name: &str, args: &Value) -> Result<String> {
     if !definitions(scope).iter().any(|d| d.name == name) {
         bail!("tool '{name}' is not available (access level: {:?})", scope.access);
@@ -123,17 +138,27 @@ pub async fn call(state: &Arc<AppState>, scope: &Scope, name: &str, args: &Value
             let d = s.dialect();
             let mut g = s.meta().await?;
             let c = g.as_mut().unwrap();
-            let schema = match arg(args, "schema") {
-                Some(x) => x.to_string(),
-                None => metadata::default_schema(c, d).await?,
-            };
+            let schema = resolve_schema(c, d, scope, arg(args, "schema")).await?;
+            let filter = arg(args, "filter").map(|f| f.to_lowercase().replace([' ', '_'], ""));
             let objs = metadata::objects(c, d, &schema).await?;
             let lines: Vec<String> = objs
                 .iter()
                 .filter(|o| matches!(o.kind, ObjectKind::Table | ObjectKind::View | ObjectKind::MaterializedView))
-                .map(|o| format!("{} ({:?})", o.name, o.kind).to_lowercase().replace("materializedview", "materialized view"))
+                .filter(|o| filter.as_deref().is_none_or(|f| o.name.to_lowercase().replace([' ', '_'], "").contains(f)))
+                .map(|o| format!("{} ({})", o.name, format!("{:?}", o.kind).to_lowercase().replace("materializedview", "materialized view")))
                 .collect();
-            Ok(format!("Schema {schema}:\n{}", lines.join("\n")))
+            if lines.is_empty() {
+                return Ok(match filter {
+                    Some(_) => format!("Schema {schema}: no table matches the filter. Try a shorter or English/German variant, or list without filter."),
+                    None => format!("Schema {schema} contains no tables."),
+                });
+            }
+            if lines.len() > 200 {
+                // Keep large schemas short: names only, comma separated.
+                let names: Vec<&str> = lines.iter().map(|l| l.split(" (").next().unwrap_or(l)).collect();
+                return Ok(format!("Schema {schema} ({} objects, use 'filter' to narrow down):\n{}", names.len(), names.join(", ")));
+            }
+            Ok(format!("Schema {schema} ({} objects):\n{}", lines.len(), lines.join("\n")))
         }
         "describe_table" => {
             let id = resolve_connection(state, scope, args)?;
@@ -145,7 +170,7 @@ pub async fn call(state: &Arc<AppState>, scope: &Scope, name: &str, args: &Value
             let (schema, table) = match (arg(args, "schema"), table.split_once('.')) {
                 (Some(sc), _) => (sc.to_string(), table.to_string()),
                 (None, Some((a, b))) => (a.to_string(), b.to_string()),
-                (None, None) => (metadata::default_schema(c, d).await?, table.to_string()),
+                (None, None) => (resolve_schema(c, d, scope, None).await?, table.to_string()),
             };
             let t = metadata::describe(c, d, &schema, &table, ObjectKind::Table).await?;
             Ok(serde_json::to_string_pretty(&t)?)
@@ -154,7 +179,7 @@ pub async fn call(state: &Arc<AppState>, scope: &Scope, name: &str, args: &Value
             let id = resolve_connection(state, scope, args)?;
             let s = state.session(&id).await?;
             let sql = arg(args, "sql").context("parameter 'sql' is required")?;
-            let r = s.read_only_query(sql, 50).await?;
+            let r = s.read_only_query(sql, 50, scope.schema.as_deref()).await?;
             Ok(format_rows(&r))
         }
         "execute_sql" => {
@@ -216,8 +241,9 @@ fn format_rows(r: &crate::model::QueryResult) -> String {
     out
 }
 
-/// Compact schema description for the system prompt.
-pub async fn schema_context(state: &Arc<AppState>, connection_id: &str, schema: Option<&str>) -> Result<String> {
+/// Compact schema description for the system prompt, at most about `budget` characters:
+/// all tables with columns if that fits, otherwise only the table names.
+pub async fn schema_context(state: &Arc<AppState>, connection_id: &str, schema: Option<&str>, budget: usize) -> Result<String> {
     let s = state.session(connection_id).await?;
     let d = s.dialect();
     let mut g = s.meta().await?;
@@ -227,34 +253,38 @@ pub async fn schema_context(state: &Arc<AppState>, connection_id: &str, schema: 
         None => metadata::default_schema(c, d).await.unwrap_or_default(),
     };
     let cols = metadata::schema_columns(c, d, &schema).await.unwrap_or_default();
-    let mut out = String::new();
-    let mut current = String::new();
-    let mut parts: Vec<String> = vec![];
-    let flush = |out: &mut String, current: &str, parts: &mut Vec<String>| {
-        if !current.is_empty() {
-            out.push_str(&format!("{current}({})\n", parts.join(", ")));
-        }
-        parts.clear();
-    };
+    let mut tables: Vec<(String, Vec<String>)> = vec![];
     for (t, col, ty) in cols {
-        if t != current {
-            flush(&mut out, &current, &mut parts);
-            current = t;
-            if out.len() > 24_000 {
-                out.push_str("… (schema truncated, use the tools to inspect more tables)\n");
-                current.clear();
+        match tables.last_mut() {
+            Some((name, parts)) if *name == t => parts.push(format!("{col} {ty}")),
+            _ => tables.push((t, vec![format!("{col} {ty}")])),
+        }
+    }
+    let full: String = tables.iter().map(|(t, p)| format!("{t}({})\n", p.join(", "))).collect();
+    let (heading, out) = if full.len() <= budget {
+        ("Tables (name(column type, ...))", full)
+    } else {
+        let mut names = String::new();
+        for (i, (t, _)) in tables.iter().enumerate() {
+            if names.len() + t.len() + 2 > budget {
+                names.push_str(&format!("… and {} more (use list_tables with a filter)", tables.len() - i));
                 break;
             }
+            if i > 0 {
+                names.push_str(", ");
+            }
+            names.push_str(t);
         }
-        parts.push(format!("{col} {ty}"));
-    }
-    flush(&mut out, &current, &mut parts);
+        names.push('\n');
+        ("Tables (names only - the schema is large; use describe_table for columns)", names)
+    };
     Ok(format!(
-        "Database: {} — {}\nDialect: {:?}\nSchema: {}\nTables (name(column type, ...)):\n{}",
+        "Database: {} — {}\nDialect: {:?}\nSchema: {} ({} tables; unqualified names refer to it)\n{heading}:\n{}",
         s.cfg.db_type.label(),
         s.server_version.lines().next().unwrap_or(""),
         d,
         schema,
+        tables.len(),
         if out.is_empty() { "(no tables)\n".to_string() } else { out }
     ))
 }

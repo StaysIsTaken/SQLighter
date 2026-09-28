@@ -136,10 +136,10 @@ async fn common_suite(s: &Session, schema: &str) {
     assert_eq!(r.results[0].rows[0][0], Value::from(2));
 
     // Read-only agent query
-    let r = s.read_only_query("SELECT name FROM it_users ORDER BY id", 10).await.unwrap();
+    let r = s.read_only_query("SELECT name FROM it_users ORDER BY id", 10, None).await.unwrap();
     assert_eq!(r.rows.len(), 2);
-    assert!(s.read_only_query("DELETE FROM it_users", 10).await.is_err());
-    assert!(s.read_only_query("SELECT 1; DROP TABLE it_users", 10).await.is_err());
+    assert!(s.read_only_query("DELETE FROM it_users", 10, None).await.is_err());
+    assert!(s.read_only_query("SELECT 1; DROP TABLE it_users", 10, None).await.is_err());
 
     // Metadata
     let mut g = s.meta().await.unwrap();
@@ -205,6 +205,10 @@ async fn schema_switch(s: &Session, other: &str, back: &str) {
     assert!(r.results[0].error.is_none(), "{:?}", r.results[0].error);
     let r = s.execute("SELECT COUNT(*) FROM tables", &run(back), &es()).await.unwrap();
     assert!(r.results[0].error.is_some(), "unqualified name still resolved in {other}");
+    // AI read-only queries use the selected schema too.
+    let r = s.read_only_query("SELECT COUNT(*) FROM tables", 5, Some(other)).await.unwrap();
+    assert_eq!(r.rows.len(), 1);
+    assert!(s.read_only_query("SELECT COUNT(*) FROM tables", 5, Some(back)).await.is_err());
 }
 
 #[tokio::test]

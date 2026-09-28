@@ -26,7 +26,7 @@ fn provider(kind: AiProviderKind, base: &str) -> AiProviderConfig {
 }
 
 fn scope() -> Scope {
-    Scope { connection_id: Some("c".into()), access: AiAccessLevel::Schema, allow_write: false, allow_open_editor: false, label: "test".into() }
+    Scope { connection_id: Some("c".into()), access: AiAccessLevel::Schema, allow_write: false, allow_open_editor: false, label: "test".into(), schema: None }
 }
 
 struct Capture {
@@ -257,4 +257,55 @@ async fn model_lists() {
     let m = providers::list_models(&provider(AiProviderKind::Anthropic, &base), Some("k".into())).await.unwrap();
     assert_eq!(m.last().unwrap().name.as_deref(), Some("Claude Sonnet 5"));
     assert!(providers::list_models(&provider(AiProviderKind::Anthropic, &base), None).await.is_err());
+}
+
+#[test]
+fn ollama_context_window() {
+    use providers::ollama_num_ctx;
+    // Never Ollama's small default; grows with the prompt; limited by model and upper bound.
+    assert_eq!(ollama_num_ctx(500, None), 8_192);
+    assert_eq!(ollama_num_ctx(9_000, None), 12_288);
+    assert_eq!(ollama_num_ctx(100_000, None), 32_768);
+    assert_eq!(ollama_num_ctx(9_000, Some(8_192)), 8_192);
+    assert_eq!(ollama_num_ctx(500, Some(4_096)), 4_096);
+}
+
+#[tokio::test]
+async fn ollama_requests_large_enough_context() {
+    use axum::routing::post as p;
+    let seen: Log = Default::default();
+    let s2 = seen.clone();
+    let router = Router::new()
+        .route("/api/show", p(|| async { axum::Json(json!({"model_info": {"gemma3.context_length": 16384}})) }))
+        .route(
+            "/api/chat",
+            p(move |body: Bytes| {
+                let s2 = s2.clone();
+                async move {
+                    s2.lock().unwrap().push(serde_json::from_slice(&body).unwrap());
+                    json!({"message": {"content": "ok"}, "done": true}).to_string() + "\n"
+                }
+            }),
+        );
+    let base = serve(router).await;
+    let r = runner(Default::default());
+    // A big schema in the system prompt (~40k characters) must not be cut off silently.
+    let (emit, _) = capture();
+    let mut prov = provider(AiProviderKind::Ollama, &base);
+    prov.model = "gemma3".into();
+    providers::ollama(&prov, "x".repeat(40_000), &history(), &[], &r, &emit).await.unwrap();
+    let body = seen.lock().unwrap()[0].clone();
+    assert_eq!(body["options"]["num_ctx"], 16_384);
+    assert_eq!(body["options"]["temperature"], 0.0);
+
+    // Too large even for the model: the user gets a notice instead of a confusing answer.
+    let notices = Arc::new(Mutex::new(vec![]));
+    let n2 = notices.clone();
+    let emit = Emit::new(Arc::new(move |k| {
+        if let ChatEventKind::Notice { code } = k {
+            n2.lock().unwrap().push(code)
+        }
+    }));
+    providers::ollama(&prov, "x".repeat(60_000), &history(), &[], &r, &emit).await.unwrap();
+    assert_eq!(*notices.lock().unwrap(), vec!["context-overflow".to_string()]);
 }

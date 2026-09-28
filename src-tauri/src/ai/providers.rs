@@ -150,15 +150,58 @@ pub async fn openai(p: &AiProviderConfig, key: Option<String>, system: String, h
 // ------------------------------------------------------------------------------------------
 // Ollama (/api/chat, NDJSON streaming)
 
+/// Upper bound for the context window SQLighter requests from Ollama (memory use grows with it).
+const OLLAMA_MAX_CTX: u64 = 32_768;
+/// Room left for the model's answer.
+const OLLAMA_ANSWER_TOKENS: u64 = 2_048;
+
+/// Rough token estimate (≈ 3 characters per token for SQL / mixed-language text).
+pub fn estimate_tokens(v: &Value) -> u64 {
+    (v.to_string().len() as u64).div_ceil(3)
+}
+
+/// Context window to request: large enough for the prompt plus an answer, at least 8k (Ollama's
+/// default of 2–4k silently cuts off the beginning of the prompt), at most what the model supports.
+pub fn ollama_num_ctx(prompt_tokens: u64, model_max: Option<u64>) -> u64 {
+    let cap = model_max.unwrap_or(OLLAMA_MAX_CTX).min(OLLAMA_MAX_CTX).max(2_048);
+    (prompt_tokens + OLLAMA_ANSWER_TOKENS).div_ceil(2_048).saturating_mul(2_048).clamp(8_192.min(cap), cap)
+}
+
+/// The model's maximum context length from `/api/show` (cached per base URL + model).
+async fn ollama_model_max(http: &reqwest::Client, p: &AiProviderConfig) -> Option<u64> {
+    static CACHE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Option<u64>>>> = std::sync::LazyLock::new(Default::default);
+    let key = format!("{}|{}", p.base_url, p.model);
+    if let Some(v) = CACHE.lock().unwrap().get(&key) {
+        return *v;
+    }
+    let v: Option<u64> = async {
+        let r = http.post(join(&p.base_url, "api/show")).json(&json!({"model": p.model})).send().await.ok()?;
+        let v: Value = r.error_for_status().ok()?.json().await.ok()?;
+        v.get("model_info")?.as_object()?.iter().find(|(k, _)| k.ends_with(".context_length")).and_then(|(_, v)| v.as_u64())
+    }
+    .await;
+    CACHE.lock().unwrap().insert(key, v);
+    v
+}
+
 pub async fn ollama(p: &AiProviderConfig, system: String, history: &[ChatMessage], tool_defs: &[ToolDef], runner: &ToolRunner, emit: &Emit) -> Result<()> {
     let http = client()?;
     let mut messages: Vec<Value> = vec![json!({"role": "system", "content": system})];
     messages.extend(history.iter().map(|m| json!({"role": m.role, "content": m.content})));
     let mut tools = tool_specs_openai(tool_defs);
+    let model_max = ollama_model_max(&http, p).await;
+    let mut warned = false;
     for _ in 0..MAX_TOOL_ROUNDS {
-        let mut body = json!({"model": p.model, "messages": messages, "stream": true});
+        let prompt_tokens = estimate_tokens(&json!(messages)) + estimate_tokens(&json!(tools));
+        let num_ctx = ollama_num_ctx(prompt_tokens, model_max);
+        if prompt_tokens + 512 > num_ctx && !warned {
+            // Ollama would drop the beginning of the conversation (instructions, question).
+            emit.notice("context-overflow");
+            warned = true;
+        }
+        let mut body = json!({"model": p.model, "messages": messages, "stream": true, "options": {"num_ctx": num_ctx}});
         if let Some(t) = p.temperature {
-            body["options"] = json!({"temperature": t});
+            body["options"]["temperature"] = json!(t);
         }
         if !tools.is_empty() {
             body["tools"] = json!(tools);

@@ -627,6 +627,8 @@ pub enum ChatEventKind {
     Text { text: String },
     Tool { name: String, detail: String },
     Session { session_id: String },
+    /// Hint shown in the chat; `code` is translated by the UI (e.g. "context-overflow").
+    Notice { code: String },
     Done,
     Error { error: String },
 }

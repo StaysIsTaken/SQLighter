@@ -397,6 +397,7 @@ export type ChatEvent =
   | { requestId: string; type: 'text'; text: string }
   | { requestId: string; type: 'tool'; name: string; detail: string }
   | { requestId: string; type: 'session'; sessionId: string }
+  | { requestId: string; type: 'notice'; code: string }
   | { requestId: string; type: 'done' }
   | { requestId: string; type: 'error'; error: string }
 

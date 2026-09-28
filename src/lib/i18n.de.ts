@@ -510,4 +510,5 @@ export const de: Record<string, string> = {
   'Choose from list': 'Aus Liste wählen',
   '{model} (not in list)': '{model} (nicht in der Liste)',
   'Other model…': 'Anderes Modell eingeben…',
+  'The conversation is too long for this local model: the beginning (instructions, your question) may be cut off. Start a new chat, ask more specifically, or use a model with a larger context window.': 'Das Gespräch ist zu lang für dieses lokale Modell: Der Anfang (Anweisungen, deine Frage) wird eventuell abgeschnitten. Starte einen neuen Chat, frag gezielter oder nutze ein Modell mit größerem Kontextfenster.',
 }
