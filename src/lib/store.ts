@@ -18,6 +18,7 @@ import type {
 } from '@shared/types'
 import { api, errorMessage } from './api'
 import { t } from './i18n'
+import { describeError } from './errors'
 
 export interface SqlTab {
   id: string
@@ -174,7 +175,7 @@ export const useStore = create<State>((set, get) => ({
       } catch (e) {
         const msg = errorMessage(e)
         set((s) => ({ conn: { ...s.conn, [id]: { status: 'error', error: msg } } }))
-        get().toast(t('Connection "{name}" failed: {error}', { name: c.name, error: msg }), 'error')
+        get().toast(t('Connection "{name}" failed: {error}', { name: c.name, error: describeError(msg) }), 'error')
         return false
       }
     }

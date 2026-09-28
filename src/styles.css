@@ -1364,6 +1364,7 @@ button {
   -webkit-user-select: text;
   user-select: text;
   word-break: break-word;
+  white-space: pre-line;
 }
 .toast.error {
   border-color: var(--danger);

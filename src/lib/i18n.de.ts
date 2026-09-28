@@ -467,5 +467,13 @@ export const de: Record<string, string> = {
   '— no connection —': '— keine Verbindung —',
   '— none —': '— keiner —',
   '•••••• (unchanged)': '•••••• (unverändert)',
-  '•••••• stored in keychain (enter to replace)': '•••••• im Schlüsselbund gespeichert (zum Ersetzen eingeben)'
+  '•••••• stored in keychain (enter to replace)': '•••••• im Schlüsselbund gespeichert (zum Ersetzen eingeben)',
+  "Connection failed": "Verbindung fehlgeschlagen",
+  "Enable TLS, use an SSH tunnel, or acknowledge the risk in the \"TLS / Security\" tab.": "TLS aktivieren, einen SSH-Tunnel nutzen oder das Risiko im Tab „TLS / Sicherheit“ bestätigen.",
+  "The host is reachable, but nothing accepts connections on this port. Check that the database server is running, listens on the network (MySQL/MariaDB: bind-address, PostgreSQL: listen_addresses) and that no firewall blocks the port. Alternatively connect via SSH tunnel with database host 127.0.0.1.": "Der Host ist erreichbar, aber auf diesem Port nimmt niemand Verbindungen an. Prüfe, ob der Datenbankserver läuft, im Netzwerk lauscht (MySQL/MariaDB: bind-address, PostgreSQL: listen_addresses) und keine Firewall den Port blockiert. Alternativ per SSH-Tunnel mit Datenbank-Host 127.0.0.1 verbinden.",
+  "No answer from the host. Check the address, the VPN connection and firewalls between you and the server.": "Keine Antwort vom Host. Prüfe die Adresse, die VPN-Verbindung und Firewalls zwischen dir und dem Server.",
+  "The host cannot be reached. Check the address and whether the VPN is connected.": "Der Host ist nicht erreichbar. Prüfe die Adresse und ob das VPN verbunden ist.",
+  "The host name could not be resolved. Check the spelling or use the IP address.": "Der Hostname konnte nicht aufgelöst werden. Prüfe die Schreibweise oder nutze die IP-Adresse.",
+  "The server rejected the login. Check user and password, and whether the user may connect from your address (MySQL/MariaDB: user@host, PostgreSQL: pg_hba.conf).": "Der Server hat die Anmeldung abgelehnt. Prüfe Benutzer und Passwort und ob der Benutzer sich von deiner Adresse aus verbinden darf (MySQL/MariaDB: user@host, PostgreSQL: pg_hba.conf).",
+  "The server certificate could not be verified. Check the CA file, the host name, or use \"Pinned certificate\" in the TLS tab.": "Das Serverzertifikat konnte nicht geprüft werden. Prüfe die CA-Datei und den Hostnamen oder nutze „Gepinntes Zertifikat“ im TLS-Tab.",
 }

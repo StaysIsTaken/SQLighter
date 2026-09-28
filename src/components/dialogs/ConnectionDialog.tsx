@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, FolderOpen, KeyRound, Loader2, Lock, LockO
 import type { CertInfo, ConnectionConfig, ConnectionSecrets, ConnectionView, DbType, TlsMode } from '@shared/types'
 import { DB_TYPES } from '@shared/types'
 import { api, errorMessage } from '@/lib/api'
+import { cleanError, errorHint } from '@/lib/errors'
 import { t } from '@/lib/i18n'
 import { useStore } from '@/lib/store'
 import { DbIcon, Modal } from '../ui'
@@ -160,14 +161,15 @@ export function ConnectionDialog({ connection, folderId }: { connection?: Connec
       }
       footer={
         <>
-          {test && (
-            <span className="row small grow" style={{ color: test.ok ? 'var(--ok)' : 'var(--danger)', minWidth: 0 }}>
-              {test.ok ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+          {test?.ok && (
+            <span className="row small grow" style={{ color: 'var(--ok)', minWidth: 0 }}>
+              <CheckCircle2 size={15} />
               <span className="ellipsis" title={test.message}>
                 {test.message}
               </span>
             </span>
           )}
+          {test && !test.ok && <span className="grow" />}
           <button className="btn" onClick={runTest} disabled={!!busy}>
             {busy === 'test' && <Loader2 size={14} className="spin" />} {t('Test connection')}
           </button>
@@ -180,6 +182,16 @@ export function ConnectionDialog({ connection, folderId }: { connection?: Connec
         </>
       }
     >
+      {test && !test.ok && (
+        <div className="callout danger" style={{ marginBottom: 14 }}>
+          <AlertTriangle size={16} color="var(--danger)" />
+          <div style={{ minWidth: 0, wordBreak: 'break-word', userSelect: 'text', WebkitUserSelect: 'text' }}>
+            <b>{t('Connection failed')}</b>
+            <div className="mono small">{cleanError(test.message)}</div>
+            {errorHint(test.message) && <div style={{ marginTop: 6 }}>{errorHint(test.message)}</div>}
+          </div>
+        </div>
+      )}
       {tab === 'general' && (
         <>
           {isNew && (
