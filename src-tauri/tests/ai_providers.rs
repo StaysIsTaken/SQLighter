@@ -237,3 +237,24 @@ fn tool_access_levels() {
     assert!(definitions(&s).iter().any(|d| d.name == "list_connections"));
     assert!(definitions(&s).iter().all(|d| d.name == "list_connections" || d.schema["required"].as_array().unwrap().contains(&json!("connection"))));
 }
+
+#[tokio::test]
+async fn model_lists() {
+    use axum::routing::get;
+    let router = Router::new()
+        .route("/v1/models", get(|| async { axum::Json(json!({"data": [{"id": "gpt-4.1"}, {"id": "text-embedding-3-small"}, {"id": "whisper-1"}, {"id": "gpt-4.1-mini"}, {"id": "claude-sonnet-5", "display_name": "Claude Sonnet 5"}]})) }))
+        .route("/api/tags", get(|| async { axum::Json(json!({"models": [{"name": "qwen2.5-coder:7b"}, {"name": "nomic-embed-text:latest"}]})) }));
+    let base = serve(router).await;
+
+    let m = providers::list_models(&provider(AiProviderKind::Openai, &format!("{base}/v1")), None).await.unwrap();
+    let ids: Vec<&str> = m.iter().map(|x| x.id.as_str()).collect();
+    assert_eq!(ids, ["claude-sonnet-5", "gpt-4.1", "gpt-4.1-mini"]);
+
+    let m = providers::list_models(&provider(AiProviderKind::Ollama, &base), None).await.unwrap();
+    assert_eq!(m.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["qwen2.5-coder:7b"]);
+
+    // Anthropic keeps the API order and display names; without a key it asks for one.
+    let m = providers::list_models(&provider(AiProviderKind::Anthropic, &base), Some("k".into())).await.unwrap();
+    assert_eq!(m.last().unwrap().name.as_deref(), Some("Claude Sonnet 5"));
+    assert!(providers::list_models(&provider(AiProviderKind::Anthropic, &base), None).await.is_err());
+}

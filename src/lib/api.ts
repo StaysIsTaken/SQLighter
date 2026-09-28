@@ -2,6 +2,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
+  AiModelInfo,
+  AiProviderConfig,
   ApprovalRequest,
   BackupOptions,
   CertInfo,
@@ -110,7 +112,7 @@ export const api = {
   // ai
   aiChat: (request: ChatRequest) => invoke<void>('ai_chat', { request }),
   aiCancel: (requestId: string) => invoke<void>('ai_cancel', { requestId }),
-  aiListModels: (providerId: string) => invoke<string[]>('ai_list_models', { providerId }),
+  aiListModels: (provider: AiProviderConfig, apiKey?: string) => invoke<AiModelInfo[]>('ai_list_models', { provider, apiKey: apiKey || null }),
   detectClaude: (command?: string) => invoke<ClaudeInfo>('detect_claude', { command: command ?? null }),
   mcpInfo: () => invoke<McpInfo>('mcp_info'),
   mcpRegenerateToken: () => invoke<McpInfo>('mcp_regenerate_token')

@@ -359,6 +359,12 @@ export interface AiProviderConfig {
   temperature?: number
 }
 
+export interface AiModelInfo {
+  id: string
+  /** Display name, where the provider reports one. */
+  name?: string
+}
+
 export interface AiProviderView extends AiProviderConfig {
   hasApiKey: boolean
 }

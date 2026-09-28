@@ -318,12 +318,42 @@ pub async fn anthropic(p: &AiProviderConfig, key: Option<String>, system: String
 
 // ------------------------------------------------------------------------------------------
 
-pub async fn list_models(p: &AiProviderConfig, key: Option<String>) -> Result<Vec<String>> {
+/// A model offered by a provider. `name` is a display name where the API provides one.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ModelInfo {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Models that cannot be used for chat (embeddings, audio, images, moderation, legacy completions).
+fn is_chat_model(id: &str) -> bool {
+    let id = id.to_ascii_lowercase();
+    !["embed", "tts", "whisper", "dall-e", "moderation", "davinci", "babbage", "transcribe", "gpt-image", "-realtime", "-audio", "-search", "rerank"]
+        .iter()
+        .any(|x| id.contains(x))
+}
+
+pub async fn list_models(p: &AiProviderConfig, key: Option<String>) -> Result<Vec<ModelInfo>> {
     let http = client()?;
-    let mut out: Vec<String> = match p.kind {
+    let ids = |v: &Value, arr: &str, field: &str| -> Vec<ModelInfo> {
+        v.get(arr)
+            .and_then(|m| m.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|m| {
+                        let id = m.get(field)?.as_str()?.to_string();
+                        let name = m.get("display_name").and_then(|n| n.as_str()).map(String::from).filter(|n| *n != id);
+                        Some(ModelInfo { id, name })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut out: Vec<ModelInfo> = match p.kind {
         AiProviderKind::Ollama => {
             let v: Value = check(http.get(join(&p.base_url, "api/tags")).send().await?).await?.json().await?;
-            v.get("models").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(String::from)).collect()).unwrap_or_default()
+            ids(&v, "models", "name")
         }
         AiProviderKind::Openai => {
             let mut req = http.get(join(&p.base_url, "models"));
@@ -331,18 +361,23 @@ pub async fn list_models(p: &AiProviderConfig, key: Option<String>) -> Result<Ve
                 req = req.bearer_auth(k);
             }
             let v: Value = check(req.send().await?).await?.json().await?;
-            v.get("data").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|m| m.get("id").and_then(|n| n.as_str()).map(String::from)).collect()).unwrap_or_default()
+            ids(&v, "data", "id")
         }
         AiProviderKind::Anthropic => {
-            let key = key.context("API key missing")?;
-            let v: Value = check(http.get(join(&p.base_url, "v1/models")).header("x-api-key", key).header("anthropic-version", "2023-06-01").send().await?)
+            let key = key.filter(|k| !k.is_empty()).context("Enter the API key to load the models.")?;
+            let v: Value = check(http.get(join(&p.base_url, "v1/models?limit=100")).header("x-api-key", key).header("anthropic-version", "2023-06-01").send().await?)
                 .await?
                 .json()
                 .await?;
-            v.get("data").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|m| m.get("id").and_then(|n| n.as_str()).map(String::from)).collect()).unwrap_or_default()
+            // Newest first, as returned by the API.
+            return Ok(ids(&v, "data", "id"));
         }
-        AiProviderKind::ClaudeCode => vec!["opus".into(), "sonnet".into(), "haiku".into()],
+        AiProviderKind::ClaudeCode => {
+            return Ok(["opus", "sonnet", "haiku"].iter().map(|m| ModelInfo { id: m.to_string(), name: None }).collect());
+        }
     };
-    out.sort();
+    out.retain(|m| is_chat_model(&m.id));
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    out.dedup();
     Ok(out)
 }

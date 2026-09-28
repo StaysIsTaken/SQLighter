@@ -179,11 +179,15 @@ pub fn ai_cancel(state: S<'_>, request_id: String) {
 }
 
 #[tauri::command]
-pub async fn ai_list_models(state: S<'_>, provider_id: String) -> AppResult<Vec<String>> {
-    let p = state.store.settings().ai_providers.into_iter().find(|p| p.id == provider_id).ok_or_else(|| app_err!("provider not found"))?;
-    validate_provider(&p)?;
-    let key = state.store.ai_api_key(&p.id);
-    providers::list_models(&p, key).await.map_err(AppError::from)
+pub async fn ai_list_models(state: S<'_>, provider: AiProviderConfig, api_key: Option<String>) -> AppResult<Vec<providers::ModelInfo>> {
+    validate_provider(&provider)?;
+    // Lists models for the (possibly unsaved) settings in the dialog. The stored key is only
+    // used for the endpoint it was saved for, never sent to a URL typed in afterwards.
+    let key = api_key.filter(|k| !k.is_empty()).or_else(|| {
+        let saved = state.store.settings().ai_providers.into_iter().find(|x| x.id == provider.id)?;
+        (saved.kind == provider.kind && saved.base_url.trim() == provider.base_url.trim()).then(|| state.store.ai_api_key(&provider.id)).flatten()
+    });
+    providers::list_models(&provider, key).await.map_err(AppError::from)
 }
 
 #[derive(Serialize)]

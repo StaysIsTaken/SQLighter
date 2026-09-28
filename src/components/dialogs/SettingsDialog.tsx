@@ -1,7 +1,7 @@
 // Settings: general, AI providers, MCP server, security.
 import { useEffect, useState } from 'react'
 import { Bot, ClipboardCopy, KeyRound, Loader2, Plug, Plus, RefreshCw, Settings2, Shield, Trash2 } from 'lucide-react'
-import type { AiAccessLevel, AiProviderKind, AiProviderView, McpInfo, Settings, SettingsView } from '@shared/types'
+import type { AiAccessLevel, AiModelInfo, AiProviderKind, AiProviderView, McpInfo, Settings, SettingsView } from '@shared/types'
 import { api, errorMessage } from '@/lib/api'
 import { copyText } from '@/lib/format'
 import { setLanguage, t } from '@/lib/i18n'
@@ -187,7 +187,7 @@ export function SettingsDialog({ section = 'general' }: { section?: Section }) {
 
 function AiSection({ s, set, keys, setKeys }: { s: SettingsView; set: (p: Partial<SettingsView>) => void; keys: Record<string, string>; setKeys: (k: Record<string, string>) => void }) {
   const [editing, setEditing] = useState<string | null>(s.aiProviders[0]?.id ?? null)
-  const [models, setModels] = useState<Record<string, string[]>>({})
+  const [models, setModels] = useState<Record<string, { list?: AiModelInfo[]; error?: string; loading?: boolean }>>({})
   const [loading, setLoading] = useState<string | null>(null)
   const { toast } = useStore.getState()
   const p = s.aiProviders.find((x) => x.id === editing)
@@ -201,19 +201,30 @@ function AiSection({ s, set, keys, setKeys }: { s: SettingsView; set: (p: Partia
   }
 
   const loadModels = async () => {
-    if (!p) return
-    setLoading('models')
+    if (!p || p.kind === 'claude-code') return
+    const key = keys[p.id]
+    const needsKey = p.kind === 'anthropic' || /\/\/api\.openai\.com\b/.test(p.baseUrl)
+    if (needsKey && !key && !p.hasApiKey) {
+      setModels((m) => ({ ...m, [p.id]: { error: t('Enter the API key to load the available models.') } }))
+      return
+    }
+    setModels((m) => ({ ...m, [p.id]: { ...m[p.id], loading: true, error: undefined } }))
     try {
-      // Model listing uses the saved configuration; save pending key/url changes first.
-      if (keys[p.id]) await api.setAiApiKey(p.id, keys[p.id])
-      await api.saveSettings(toSettings(s))
-      setModels({ ...models, [p.id]: await api.aiListModels(p.id) })
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { hasApiKey: _h, ...cfg } = p
+      const list = await api.aiListModels(cfg, key)
+      setModels((m) => ({ ...m, [p.id]: { list } }))
     } catch (e) {
-      toast(errorMessage(e), 'error')
-    } finally {
-      setLoading(null)
+      setModels((m) => ({ ...m, [p.id]: { error: errorMessage(e) } }))
     }
   }
+
+  // Load the model list automatically when a provider is opened or its URL / key changes.
+  useEffect(() => {
+    if (!p || p.kind === 'claude-code') return
+    const h = setTimeout(loadModels, 400)
+    return () => clearTimeout(h)
+  }, [p?.id, p?.kind, p?.baseUrl, p?.allowInsecureHttp, keys[p?.id ?? '']])
 
   const detect = async () => {
     if (!p) return
@@ -307,8 +318,18 @@ function AiSection({ s, set, keys, setKeys }: { s: SettingsView; set: (p: Partia
                   </div>
                 </div>
                 <div className="field">
-                  <label>{t('Model (optional)')}</label>
-                  <input className="input mono" placeholder="sonnet / opus / haiku" value={p.model} onChange={(e) => updateP({ model: e.target.value })} />
+                  <label>{t('Model')}</label>
+                  <ModelPicker
+                    key={p.id}
+                    value={p.model}
+                    onChange={(model) => updateP({ model })}
+                    models={[
+                      { id: 'opus', name: t('Opus - most capable') },
+                      { id: 'sonnet', name: t('Sonnet - balanced') },
+                      { id: 'haiku', name: t('Haiku - fastest') }
+                    ]}
+                    emptyLabel={t('Default of your Claude Code installation')}
+                  />
                 </div>
               </>
             ) : (
@@ -321,16 +342,18 @@ function AiSection({ s, set, keys, setKeys }: { s: SettingsView; set: (p: Partia
                   <div className="field">
                     <label>{t('Model')}</label>
                     <div className="row">
-                      <input className="input mono" list={`models-${p.id}`} value={p.model} onChange={(e) => updateP({ model: e.target.value })} />
-                      <datalist id={`models-${p.id}`}>
-                        {(models[p.id] ?? []).map((m) => (
-                          <option key={m} value={m} />
-                        ))}
-                      </datalist>
-                      <button className="icon-btn" title={t('Load available models')} onClick={loadModels}>
-                        <RefreshCw size={14} className={loading === 'models' ? 'spin' : ''} />
+                      <ModelPicker key={p.id} value={p.model} onChange={(model) => updateP({ model })} models={models[p.id]?.list} />
+                      <button className="icon-btn" title={t('Reload model list')} onClick={loadModels}>
+                        <RefreshCw size={14} className={models[p.id]?.loading ? 'spin' : ''} />
                       </button>
                     </div>
+                    {models[p.id]?.loading && !models[p.id]?.list && <div className="hint">{t('Loading models…')}</div>}
+                    {models[p.id]?.error && (
+                      <div className="hint" style={{ color: 'var(--warn)' }}>
+                        {t('Model list unavailable: {error}', { error: models[p.id]!.error! })}
+                      </div>
+                    )}
+                    {models[p.id]?.list?.length === 0 && <div className="hint">{t('The provider reported no models.')}</div>}
                   </div>
                   <div className="field">
                     <label>{t('Temperature')}</label>
@@ -474,4 +497,36 @@ function McpSection({ s, set, saveNow }: { s: SettingsView; set: (p: Partial<Set
 export function applyTheme(theme: string) {
   const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+}
+
+const CUSTOM = '\u0000custom'
+
+/** Dropdown of the provider's models, with a free-text fallback for anything not listed. */
+function ModelPicker({ value, onChange, models, emptyLabel }: { value: string; onChange: (v: string) => void; models?: AiModelInfo[]; emptyLabel?: string }) {
+  const listed = !!models?.some((m) => m.id === value)
+  const [custom, setCustom] = useState(false)
+  if (!models?.length || custom) {
+    return (
+      <div className="col grow" style={{ gap: 4 }}>
+        <input className="input mono" value={value} placeholder={emptyLabel ?? t('Model name')} onChange={(e) => onChange(e.target.value)} autoFocus={custom} />
+        {custom && !!models?.length && (
+          <a href="#" className="small" onClick={(e) => (e.preventDefault(), setCustom(false))}>
+            {t('Choose from list')}
+          </a>
+        )}
+      </div>
+    )
+  }
+  return (
+    <select className="select mono grow" value={value} onChange={(e) => (e.target.value === CUSTOM ? setCustom(true) : onChange(e.target.value))}>
+      {emptyLabel !== undefined ? <option value="">{emptyLabel}</option> : !value && <option value="">{t('— choose —')}</option>}
+      {value && !listed && <option value={value}>{t('{model} (not in list)', { model: value })}</option>}
+      {models.map((m) => (
+        <option key={m.id} value={m.id}>
+          {m.name ? `${m.name} · ${m.id}` : m.id}
+        </option>
+      ))}
+      <option value={CUSTOM}>{t('Other model…')}</option>
+    </select>
+  )
 }
