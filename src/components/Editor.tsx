@@ -1,6 +1,6 @@
 // CodeMirror 6 SQL editor.
 import { useEffect, useRef } from 'react'
-import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete'
+import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap, type Completion, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete'
 import { defaultKeymap, history, historyKeymap, indentWithTab, toggleComment } from '@codemirror/commands'
 import { bracketMatching, foldGutter, HighlightStyle, indentOnInput, syntaxHighlighting } from '@codemirror/language'
 import { MSSQL, MySQL, PLSQL, PostgreSQL, SQLite, sql, type SQLDialect } from '@codemirror/lang-sql'
@@ -20,6 +20,8 @@ import {
 } from '@codemirror/view'
 import { tags } from '@lezer/highlight'
 import type { Dialect } from '@shared/types'
+import { quoteIdent } from '@shared/sql'
+import { clauseAt, statementAt, tableRefs } from '@shared/sqlcontext'
 
 const DIALECTS: Record<Dialect, SQLDialect> = {
   postgres: PostgreSQL,
@@ -64,6 +66,51 @@ const highlight = HighlightStyle.define([
   { tag: [tags.operator, tags.punctuation], color: 'var(--syn-op)' },
   { tag: [tags.special(tags.name), tags.quote], color: 'var(--text)' }
 ])
+
+/**
+ * Completes bare column names of the tables used in the current statement (FROM / JOIN /
+ * UPDATE / INSERT INTO) wherever columns belong: SELECT list, WHERE, ON, ORDER BY, SET, …
+ * lang-sql itself only completes columns after "table." / "alias.".
+ */
+function columnCompletion(getProps: () => EditorProps) {
+  return (ctx: CompletionContext): CompletionResult | null => {
+    const { schema, dialect = 'postgres', defaultSchema } = getProps()
+    if (!schema) return null
+    const word = ctx.matchBefore(/[\w$À-￿]*/)
+    if (!word || (word.from === word.to && !ctx.explicit)) return null
+    const prev = ctx.state.sliceDoc(Math.max(0, word.from - 1), word.from)
+    if (prev === '.' || prev === '"' || prev === '`' || prev === '[') return null
+    // Only the surroundings of the cursor matter; keeps typing fast in long scripts.
+    const base = Math.max(0, ctx.pos - 20_000)
+    const around = ctx.state.sliceDoc(base, Math.min(ctx.state.doc.length, ctx.pos + 5_000))
+    const st = statementAt(around, ctx.pos - base)
+    if (clauseAt(st.text, ctx.pos - base - st.offset) !== 'columns') return null
+    const keys = Object.keys(schema)
+    const lower = new Map(keys.map((k) => [k.toLowerCase(), k]))
+    const options: Completion[] = []
+    const seen = new Set<string>()
+    for (const ref of tableRefs(st.text)) {
+      // Tables of the editor's schema are keyed by name; others (schema.table) when present.
+      const key =
+        (ref.schema && lower.get(`${ref.schema}.${ref.name}`.toLowerCase())) ||
+        (!ref.schema || !defaultSchema || ref.schema.toLowerCase() === defaultSchema.toLowerCase() ? lower.get(ref.name.toLowerCase()) : undefined)
+      if (!key) continue
+      for (const col of schema[key]) {
+        const id = `${col}\u0000${ref.alias ?? key}`
+        if (seen.has(id)) continue
+        seen.add(id)
+        const plain = /^[A-Za-z_][\w$]*$/.test(col) && !(dialect === 'postgres' && /[A-Z]/.test(col))
+        options.push({ label: col, detail: ref.alias ? `${ref.alias} · ${key}` : key, type: 'property', boost: 20, apply: plain ? col : quoteIdent(col, dialect) })
+      }
+    }
+    return options.length ? { from: word.from, options, validFor: /^[\w$À-￿]*$/ } : null
+  }
+}
+
+function language(props: EditorProps, getProps: () => EditorProps) {
+  const d = DIALECTS[props.dialect ?? 'postgres']
+  return [sql({ dialect: d, upperCaseKeywords: true, schema: props.schema, defaultSchema: props.defaultSchema }), d.language.data.of({ autocomplete: columnCompletion(getProps) })]
+}
 
 export interface EditorProps {
   value: string
@@ -122,7 +169,7 @@ export function Editor(props: EditorProps) {
         EditorView.lineWrapping,
         placeholderExt(props.placeholder ?? ''),
         theme,
-        langComp.current.of(sql({ dialect: DIALECTS[props.dialect ?? 'postgres'], upperCaseKeywords: true, schema: props.schema, defaultSchema: props.defaultSchema })),
+        langComp.current.of(language(props, () => cb.current)),
         roComp.current.of([EditorState.readOnly.of(!!props.readOnly), EditorView.editable.of(!props.readOnly)]),
         Prec.highest(
           keymap.of([
@@ -161,7 +208,7 @@ export function Editor(props: EditorProps) {
 
   useEffect(() => {
     view.current?.dispatch({
-      effects: langComp.current.reconfigure(sql({ dialect: DIALECTS[props.dialect ?? 'postgres'], upperCaseKeywords: true, schema: props.schema, defaultSchema: props.defaultSchema }))
+      effects: langComp.current.reconfigure(language(props, () => cb.current))
     })
   }, [props.dialect, props.schema, props.defaultSchema])
 
