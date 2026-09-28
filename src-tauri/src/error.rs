@@ -23,8 +23,36 @@ impl Serialize for AppError {
 
 impl From<anyhow::Error> for AppError {
     fn from(e: anyhow::Error) -> Self {
-        // `{:#}` prints the whole context chain: "connect failed: tls handshake: ..."
-        AppError(format!("{e:#}"))
+        AppError(chain_message(&e))
+    }
+}
+
+/// Joins the context chain ("connect failed: tls handshake: ..."), skipping causes whose text
+/// already appears earlier - many drivers repeat their source error in their own message.
+pub fn chain_message(e: &anyhow::Error) -> String {
+    let mut out = String::new();
+    for cause in e.chain() {
+        let s = cause.to_string();
+        if s.is_empty() || out.contains(&s) {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str(": ");
+        }
+        out.push_str(&s);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chain_skips_repeated_causes() {
+        let io = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "Connection refused (os error 61)");
+        let e = anyhow::Error::new(io).context("Input/output error: Connection refused (os error 61)").context("connect");
+        assert_eq!(chain_message(&e), "connect: Input/output error: Connection refused (os error 61)");
     }
 }
 

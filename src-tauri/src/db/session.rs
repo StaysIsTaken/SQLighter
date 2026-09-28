@@ -143,7 +143,7 @@ impl Session {
             let kw = sql::leading_keyword(stmt);
             if !self.auto_commit.load(Ordering::SeqCst) && !self.in_tx.load(Ordering::SeqCst) && !is_tx_control(stmt) {
                 if let Err(e) = conn.begin().await {
-                    results.push(QueryResult::failed(stmt, format!("{e:#}")));
+                    results.push(QueryResult::failed(stmt, crate::error::chain_message(&e)));
                     break;
                 }
                 self.in_tx.store(true, Ordering::SeqCst);
@@ -173,7 +173,7 @@ impl Session {
                     }
                 }
                 Err(e) => {
-                    let msg = format!("{e:#}");
+                    let msg = crate::error::chain_message(&e);
                     let mut r = QueryResult::failed(stmt, msg.clone());
                     r.duration_ms = elapsed;
                     results.push(r);

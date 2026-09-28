@@ -362,7 +362,7 @@ pub async fn run_restore(state: Arc<AppState>, o: RestoreOptions, p: Progress) -
     let mut errors = Vec::new();
     for (i, st) in stmts.iter().enumerate() {
         if let Err(e) = conn.run(st, 0).await {
-            let msg = format!("statement {}: {e:#}\n{}", i + 1, crate::db::session::truncate(st, 300));
+            let msg = format!("statement {}: {}\n{}", i + 1, crate::error::chain_message(&e), crate::db::session::truncate(st, 300));
             if o.stop_on_error {
                 bail!(msg);
             }

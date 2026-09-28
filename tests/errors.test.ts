@@ -2,9 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { cleanError, errorHint } from '../src/lib/errors'
 
 describe('connection errors', () => {
-  const refused =
-    'Input/output error: Input/output error: Connection refused (os error 61): Input/output error: Connection refused (os error 61)'
-  it('removes duplicate prefixes', () => {
+  const refused = 'Input/output error: Input/output error: Connection refused (os error 61)'
+  it('removes noise prefixes', () => {
     expect(cleanError(refused)).toBe('Connection refused (os error 61)')
   })
   it('explains common failures', () => {

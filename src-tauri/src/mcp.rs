@@ -228,7 +228,7 @@ async fn handle(AxState((state, port)): AxState<(Arc<AppState>, u16)>, headers: 
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
             match tools::call(&state, &scope, name, &args).await {
                 Ok(text) => Ok(json!({"content": [{"type": "text", "text": text}], "isError": false})),
-                Err(e) => Ok(json!({"content": [{"type": "text", "text": format!("{e:#}")}], "isError": true})),
+                Err(e) => Ok(json!({"content": [{"type": "text", "text": crate::error::chain_message(&e)}], "isError": true})),
             }
         }
         "resources/list" => Ok(json!({"resources": []})),

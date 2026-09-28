@@ -35,7 +35,7 @@ where
         let r = f(p).await;
         match r {
             Ok(msg) => p2.finish(None, Some(msg)),
-            Err(e) => p2.finish(Some(format!("{e:#}")), None),
+            Err(e) => p2.finish(Some(crate::error::chain_message(&e)), None),
         }
         st.tasks.lock().unwrap().remove(&tid);
     });
@@ -295,7 +295,7 @@ async fn transfer(state: Arc<AppState>, o: TransferOptions, p: Progress) -> Resu
         if o.create_tables {
             for stmt in sqlgen::create_table(&info, sd, &sqlgen::CreateOpts { to: td, schema: &o.target_schema, name, foreign_keys: false, indexes: true }) {
                 if let Err(e) = tconn.run(&stmt, 0).await {
-                    let m = format!("{e:#}").to_ascii_lowercase();
+                    let m = crate::error::chain_message(&e).to_ascii_lowercase();
                     if !(m.contains("exist") || m.contains("already")) {
                         return Err(e.context(format!("create {target}")));
                     }

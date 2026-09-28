@@ -113,7 +113,7 @@ pub async fn ai_chat(state: S<'_>, request: ChatRequest) -> AppResult<()> {
         let r = run_chat(st2.clone(), settings.ai_access, provider, key, &request, &emit).await;
         match r {
             Ok(()) => emit.send(ChatEventKind::Done),
-            Err(e) => emit.send(ChatEventKind::Error { error: format!("{e:#}") }),
+            Err(e) => emit.send(ChatEventKind::Error { error: crate::error::chain_message(&e) }),
         }
         st2.tasks.lock().unwrap().remove(&format!("ai:{}", request.request_id));
     });
@@ -137,7 +137,7 @@ async fn run_chat(state: Arc<AppState>, access: AiAccessLevel, p: AiProviderConf
     if let (Some(id), true) = (&conn_id, access != AiAccessLevel::None) {
         match tools::schema_context(&state, id, req.schema.as_deref()).await {
             Ok(s) => context.push_str(&format!("Connection: {conn_name}\n{s}\n")),
-            Err(e) => context.push_str(&format!("(schema not available: {e:#})\n")),
+            Err(e) => context.push_str(&format!("(schema not available: {})\n", crate::error::chain_message(&e))),
         }
     } else if let Some(d) = dialect {
         context.push_str(&format!("Connection: {conn_name}, dialect {d:?} (schema access disabled in settings)\n"));
@@ -159,7 +159,7 @@ async fn run_chat(state: Arc<AppState>, access: AiAccessLevel, p: AiProviderConf
         Box::pin(async move {
             match tools::call(&state, &scope, &name, &args).await {
                 Ok(s) => s,
-                Err(e) => format!("ERROR: {e:#}"),
+                Err(e) => format!("ERROR: {}", crate::error::chain_message(&e)),
             }
         })
     });

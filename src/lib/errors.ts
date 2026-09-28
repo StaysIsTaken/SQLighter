@@ -1,19 +1,9 @@
 // Turns raw driver/network errors into a readable message plus a hint on what to check.
 import { t } from './i18n'
 
-/** Removes repeated prefixes like "Input/output error: Input/output error: …" and duplicate segments. */
+/** Removes the noise prefix "Input/output error: " that drivers wrap around network errors. */
 export function cleanError(msg: string): string {
-  const parts = msg
-    .split(/:\s+/)
-    .map((p) => p.trim())
-    .filter(Boolean)
-  const out: string[] = []
-  for (const p of parts) {
-    if (/^(input\/output error|io error)$/i.test(p)) continue
-    if (out.some((o) => o.toLowerCase() === p.toLowerCase())) continue
-    out.push(p)
-  }
-  return out.join(': ') || msg
+  return msg.replace(/(?:input\/output error|io error):\s*/gi, '').trim() || msg
 }
 
 export function errorHint(msg: string): string | null {

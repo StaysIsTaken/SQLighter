@@ -300,6 +300,24 @@ async fn mariadb() {
     s.close().await;
 }
 
+/// MariaDB users created with `IDENTIFIED VIA ed25519` (common for root on some distributions).
+/// Requires SQLIGHTER_MY_ED25519_USER / _PASSWORD for such a user.
+#[tokio::test]
+async fn mariadb_ed25519_auth() {
+    let Ok(user) = std::env::var("SQLIGHTER_MY_ED25519_USER") else { return };
+    sqlighter_lib::tls::install_default_provider();
+    let mut c = cfg(DbType::Mariadb);
+    c.user = user;
+    c.database = String::new();
+    let pw = env("SQLIGHTER_MY_ED25519_PASSWORD", "");
+    let (s, _) = Session::open(c.clone(), ConnectionSecrets { password: Some(pw), ..Default::default() }, no_prompt(), true).await.unwrap();
+    exec(&s, "SELECT 1").await;
+    s.close().await;
+    let e = Session::open(c, ConnectionSecrets { password: Some("wrong".into()), ..Default::default() }, no_prompt(), true).await.err().expect("wrong password accepted");
+    let msg = format!("{e:#}");
+    assert!(msg.contains("Access denied"), "{msg}");
+}
+
 #[tokio::test]
 async fn sqlite() {
     let path = std::env::temp_dir().join(format!("sqlighter-it-{}.db", std::process::id()));
