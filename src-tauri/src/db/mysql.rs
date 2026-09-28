@@ -32,6 +32,9 @@ impl MyConn {
             .pass(secrets.password.clone().filter(|p| !p.is_empty()))
             .db_name(Some(cfg.database.clone()).filter(|d| !d.is_empty()))
             .prefer_socket(false)
+            // No statement cache: a cached statement stays bound to the database it was prepared
+            // in and would ignore a later USE (schema switch).
+            .stmt_cache_size(0)
             .conn_ttl(None)
             .wait_timeout(Some(28_800))
             .client_found_rows(false);
@@ -65,6 +68,31 @@ impl MyConn {
 
     pub fn id(&self) -> u32 {
         self.conn.id()
+    }
+
+    /// Runs exactly one statement through the binary protocol. A prepared statement cannot contain
+    /// several statements, whatever the text looks like (used for untrusted SQL from AI agents).
+    pub async fn run_single(&mut self, sql: &str, max_rows: usize) -> Result<QueryResult> {
+        let mut result = self.conn.exec_iter(sql, ()).await?;
+        let cols: Vec<Column> = result.columns_ref().to_vec();
+        if cols.is_empty() {
+            let affected = result.affected_rows();
+            let _ = result.collect::<mysql_async::Row>().await?;
+            return Ok(QueryResult::command(sql, Some(affected)));
+        }
+        let metas = columns(&cols);
+        let mut rows = Vec::new();
+        let mut truncated = false;
+        result
+            .for_each(|r| {
+                if rows.len() < max_rows {
+                    rows.push(convert_row(r, &cols));
+                } else {
+                    truncated = true;
+                }
+            })
+            .await?;
+        Ok(QueryResult::rows(sql, metas, rows, truncated))
     }
 
     pub async fn run(&mut self, sql: &str, max_rows: usize) -> Result<Vec<QueryResult>> {

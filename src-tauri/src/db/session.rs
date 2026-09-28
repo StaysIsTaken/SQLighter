@@ -263,15 +263,18 @@ impl Session {
         Ok(total)
     }
 
-    /// Runs a single read-only query inside a READ ONLY transaction that is always rolled back.
-    /// Runs one read-only statement in a READ ONLY transaction that is always rolled back.
-    /// `schema` sets the default for unqualified names.
+    /// Runs one read-only statement from an AI agent / MCP client in a READ ONLY transaction that
+    /// is always rolled back. The SQL is untrusted: it must pass [`sql::check_agent_query`] and is
+    /// executed as a single statement. `schema` sets the default for unqualified names.
     pub async fn read_only_query(&self, stmt: &str, max_rows: usize, schema: Option<&str>) -> Result<QueryResult> {
-        let stmts = sql::split_statements(stmt, self.dialect());
-        if stmts.len() != 1 || !sql::is_read_only(&stmts[0]) {
+        let d = self.dialect();
+        let stmts = sql::split_statements(stmt, d);
+        if stmts.len() != 1 {
             bail!("Only a single read-only statement (SELECT/WITH/SHOW/EXPLAIN) is allowed");
         }
-        let d = self.dialect();
+        if let Err(reason) = sql::check_agent_query(&stmts[0], d) {
+            bail!("Query rejected: {reason}. Only a single read-only statement (SELECT/WITH/SHOW/EXPLAIN) is allowed.");
+        }
         let switch = schema.and_then(|s| use_schema_sql(d, s));
         let mut g = self.meta().await?;
         let c = g.as_mut().unwrap();
@@ -287,7 +290,7 @@ impl Session {
             }
         }
         let start = Instant::now();
-        let r = tokio::time::timeout(Duration::from_secs(60), c.run(&stmts[0], max_rows)).await.unwrap_or_else(|_| Err(anyhow!("query timed out")));
+        let r = tokio::time::timeout(Duration::from_secs(60), c.run_single(&stmts[0], max_rows)).await.unwrap_or_else(|_| Err(anyhow!("query timed out")));
         let _ = c.end_read_only().await;
         let mut r = r?.into_iter().find(|x| x.is_result_set).ok_or_else(|| anyhow!("statement returned no rows"))?;
         r.duration_ms = start.elapsed().as_millis() as u64;

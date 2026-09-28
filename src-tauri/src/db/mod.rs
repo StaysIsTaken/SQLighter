@@ -121,6 +121,16 @@ impl Conn {
         }
     }
 
+    /// Runs one statement. On MySQL/MariaDB (where a text query may contain several statements)
+    /// this goes through a prepared statement; the other drivers only ever run one statement per
+    /// call (PostgreSQL prepares first, SQLite prepares, Oracle executes one statement).
+    pub async fn run_single(&mut self, sql: &str, max_rows: usize) -> Result<Vec<QueryResult>> {
+        match self {
+            Conn::My(c) => Ok(vec![c.run_single(sql, max_rows).await?]),
+            _ => self.run(sql, max_rows).await,
+        }
+    }
+
     /// Runs a query and returns all rows (for metadata queries).
     pub async fn rows(&mut self, sql: &str) -> Result<Vec<Row>> {
         let r = self.run(sql, usize::MAX).await?;

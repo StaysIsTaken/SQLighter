@@ -290,6 +290,29 @@ async fn mariadb() {
     let (s, _) = Session::open(cfg(DbType::Mariadb), secrets(DbType::Mariadb), no_prompt(), true).await.unwrap();
     common_suite(&s, "sqltest").await;
     schema_switch(&s, "information_schema", "sqltest").await;
+    // AI/MCP read-only queries cannot be abused to modify data: MySQL executes /*! */ and "--x"
+    // and accepts several statements per text query.
+    let count = || async { exec(&s, "SELECT COUNT(*) FROM it_users").await.results[0].rows[0][0].clone() };
+    let before = count().await;
+    for q in [
+        "SELECT 1 /*!; COMMIT; DELETE FROM it_users */",
+        "SELECT 1 --1; COMMIT; DELETE FROM it_users",
+        "SELECT 'a\\'' ; COMMIT; DELETE FROM it_users; -- '",
+        "SELECT LOAD_FILE('/etc/passwd')",
+    ] {
+        assert!(s.read_only_query(q, 5, None).await.is_err(), "not rejected: {q}");
+    }
+    assert_eq!(count().await, before);
+    // Agent queries go through the binary protocol; values arrive like in the editor.
+    let r = s.read_only_query("SELECT 1 AS a, DATE '2024-01-02' AS d, TIMESTAMP '2024-01-02 03:04:05' AS ts, 12.30 AS n, NULL AS z, 'x' AS s, name FROM it_users ORDER BY id", 5, None).await.unwrap();
+    assert_eq!(r.rows.len(), 2);
+    assert_eq!(r.rows[0][0], Value::from(1));
+    assert_eq!(r.rows[0][1], Value::from("2024-01-02"));
+    assert_eq!(r.rows[0][2], Value::from("2024-01-02 03:04:05"));
+    assert_eq!(r.rows[0][3], Value::from("12.30"));
+    assert_eq!(r.rows[0][4], Value::Null);
+    assert_eq!(r.rows[0][5], Value::from("x"));
+    assert_eq!(r.rows[1][6], Value::from("O'Brien"));
     let r = exec(&s, "SELECT 1, 18446744073709551615, CAST(1.5 AS DOUBLE), DATE '2024-01-02', TIMESTAMP '2024-01-02 03:04:05', 12.30, NULL, 'x'").await;
     let row = &r.results[0].rows[0];
     assert_eq!(row[0], Value::from(1));
