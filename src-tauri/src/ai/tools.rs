@@ -168,7 +168,7 @@ pub async fn call(state: &Arc<AppState>, scope: &Scope, name: &str, args: &Value
                 bail!("the user rejected this statement");
             }
             let es = crate::db::session::ExecSettings { confirm_destructive: false, max_rows: 50, timeout: Some(std::time::Duration::from_secs(300)) };
-            let r = s.execute(sql, &crate::model::ExecuteOptions { max_rows: Some(50), confirmed: true }, &es).await?;
+            let r = s.execute(sql, &crate::model::ExecuteOptions { max_rows: Some(50), confirmed: true, schema: None }, &es).await?;
             let mut out = vec![];
             for x in r.results {
                 if let Some(e) = x.error {

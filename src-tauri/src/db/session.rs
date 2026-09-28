@@ -134,6 +134,14 @@ impl Session {
         let max_rows = opts.max_rows.unwrap_or(es.max_rows).max(1);
         let mut g = self.main().await?;
         let mut results = Vec::new();
+        if let (Some(switch), Some(conn)) = (opts.schema.as_deref().and_then(|s| use_schema_sql(self.dialect(), s)), g.as_mut()) {
+            // Issued on every run: several editor tabs share this connection and the user may
+            // also have switched manually with USE / SET search_path.
+            if let Err(e) = conn.run(&switch, 1).await {
+                results.push(QueryResult::failed(&switch, crate::error::chain_message(&e)));
+                return Ok(ExecuteResponse { results, needs_confirmation: None, in_transaction: self.in_tx.load(Ordering::SeqCst) });
+            }
+        }
         self.running.store(true, Ordering::SeqCst);
         for stmt in &stmts {
             let conn = match g.as_mut() {
@@ -286,6 +294,23 @@ impl Session {
 
     pub fn secrets(&self) -> &ConnectionSecrets {
         &self.secrets
+    }
+}
+
+/// Statement that makes `schema` the default for unqualified names, if the dialect has one.
+pub fn use_schema_sql(d: Dialect, schema: &str) -> Option<String> {
+    let schema = schema.trim();
+    if schema.is_empty() {
+        return None;
+    }
+    let q = sql::quote_ident(schema, d);
+    match d {
+        Dialect::Mysql => Some(format!("USE {q}")),
+        Dialect::Postgres if schema == "public" => Some("SET search_path TO public".into()),
+        Dialect::Postgres => Some(format!("SET search_path TO {q}, public")),
+        Dialect::Oracle => Some(format!("ALTER SESSION SET CURRENT_SCHEMA = {q}")),
+        // SQL Server: the default schema belongs to the login; SQLite resolves across attached databases.
+        Dialect::Mssql | Dialect::Sqlite => None,
     }
 }
 

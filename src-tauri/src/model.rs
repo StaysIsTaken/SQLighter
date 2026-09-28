@@ -260,6 +260,9 @@ pub struct ExecuteOptions {
     pub max_rows: Option<usize>,
     #[serde(default)]
     pub confirmed: bool,
+    /// Schema / database chosen in the editor; unqualified names resolve against it.
+    #[serde(default)]
+    pub schema: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

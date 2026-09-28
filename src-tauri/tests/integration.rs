@@ -67,7 +67,7 @@ fn es() -> ExecSettings {
 }
 
 async fn exec(s: &Session, sql: &str) -> ExecuteResponse {
-    let r = s.execute(sql, &ExecuteOptions { max_rows: None, confirmed: true }, &es()).await.unwrap();
+    let r = s.execute(sql, &ExecuteOptions { max_rows: None, confirmed: true, schema: None }, &es()).await.unwrap();
     for x in &r.results {
         assert!(x.error.is_none(), "{sql}: {:?}", x.error);
     }
@@ -118,7 +118,7 @@ async fn common_suite(s: &Session, schema: &str) {
     assert_eq!(rs.rows[0][4], serde_json::json!(9.99));
 
     // Truncation
-    let r = s.execute("SELECT * FROM it_orders", &ExecuteOptions { max_rows: Some(1), confirmed: false }, &es()).await.unwrap();
+    let r = s.execute("SELECT * FROM it_orders", &ExecuteOptions { max_rows: Some(1), confirmed: false, schema: None }, &es()).await.unwrap();
     assert!(r.results[0].truncated);
 
     // Destructive statements need confirmation
@@ -198,6 +198,15 @@ async fn common_suite(s: &Session, schema: &str) {
     assert_eq!((cols, rows), (6, 2));
 }
 
+/// The schema chosen in the editor applies to unqualified names.
+async fn schema_switch(s: &Session, other: &str, back: &str) {
+    let run = |sch: &str| ExecuteOptions { max_rows: None, confirmed: true, schema: Some(sch.to_string()) };
+    let r = s.execute("SELECT COUNT(*) FROM tables", &run(other), &es()).await.unwrap();
+    assert!(r.results[0].error.is_none(), "{:?}", r.results[0].error);
+    let r = s.execute("SELECT COUNT(*) FROM tables", &run(back), &es()).await.unwrap();
+    assert!(r.results[0].error.is_some(), "unqualified name still resolved in {other}");
+}
+
 #[tokio::test]
 async fn postgres() {
     if !enabled() {
@@ -207,6 +216,7 @@ async fn postgres() {
     let (s, _) = Session::open(cfg(DbType::Postgres), secrets(DbType::Postgres), no_prompt(), true).await.unwrap();
     assert!(s.server_version.contains("PostgreSQL"));
     common_suite(&s, "public").await;
+    schema_switch(&s, "information_schema", "public").await;
 
     // Types
     let r = exec(&s, "SELECT 1::int2, 9007199254740993::int8, 1.5::float8, 'NaN'::float8, true, NULL::text, '{\"a\":1}'::jsonb, 12.30::numeric, DATE '2024-01-02'").await;
@@ -240,7 +250,7 @@ async fn postgres() {
     let mut c = cfg(DbType::Postgres);
     c.read_only = true;
     let (ro, _) = Session::open(c, secrets(DbType::Postgres), no_prompt(), true).await.unwrap();
-    let e = ro.execute("CREATE TABLE x_ro (a int)", &ExecuteOptions { max_rows: None, confirmed: true }, &es()).await;
+    let e = ro.execute("CREATE TABLE x_ro (a int)", &ExecuteOptions { max_rows: None, confirmed: true, schema: None }, &es()).await;
     assert!(e.is_err());
     s.close().await;
 }
@@ -275,6 +285,7 @@ async fn mariadb() {
     sqlighter_lib::tls::install_default_provider();
     let (s, _) = Session::open(cfg(DbType::Mariadb), secrets(DbType::Mariadb), no_prompt(), true).await.unwrap();
     common_suite(&s, "sqltest").await;
+    schema_switch(&s, "information_schema", "sqltest").await;
     let r = exec(&s, "SELECT 1, 18446744073709551615, CAST(1.5 AS DOUBLE), DATE '2024-01-02', TIMESTAMP '2024-01-02 03:04:05', 12.30, NULL, 'x'").await;
     let row = &r.results[0].rows[0];
     assert_eq!(row[0], Value::from(1));

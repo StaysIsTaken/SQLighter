@@ -91,7 +91,7 @@ export function SqlTab({ tab, visible }: { tab: SqlTabT; visible: boolean }) {
     lastSql.current = sql
     setRunning(true)
     try {
-      const res = await api.execute(tab.connectionId, sql, { confirmed: opts.confirmed, maxRows: opts.maxRows })
+      const res = await api.execute(tab.connectionId, sql, { confirmed: opts.confirmed, maxRows: opts.maxRows, schema })
       if (res.needsConfirmation) {
         const nc = res.needsConfirmation
         const isProd = nc.reason === 'production'
@@ -236,7 +236,8 @@ export function SqlTab({ tab, visible }: { tab: SqlTabT; visible: boolean }) {
           ))}
         </select>
         {connected && schemas.length > 0 && (
-          <select className="select sm" value={schema ?? ''} onChange={(e) => updateTab(tab.id, { schema: e.target.value })} title={t('Schema')}>
+          <select className="select sm" value={schema ?? ''} onChange={(e) => updateTab(tab.id, { schema: e.target.value || undefined })} title={t('Schema')}>
+            {!schema && <option value="">{t('— choose —')}</option>}
             {schemas.map((s) => (
               <option key={s} value={s}>
                 {s}

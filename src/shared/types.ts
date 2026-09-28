@@ -153,6 +153,8 @@ export interface ExecuteOptions {
   maxRows?: number
   /** User already confirmed that this may modify data. */
   confirmed?: boolean
+  /** Schema / database chosen in the editor; unqualified names resolve against it. */
+  schema?: string
 }
 
 export interface ExecuteResponse {
