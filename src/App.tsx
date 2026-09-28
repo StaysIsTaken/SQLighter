@@ -27,6 +27,7 @@ import { SqlTab } from '@/components/SqlTab'
 import { TableTab } from '@/components/TableTab'
 import { DbIcon, Logo, Splitter, usePersistentState } from '@/components/ui'
 import { ConnectionDialog } from '@/components/dialogs/ConnectionDialog'
+import { DbeaverDialog } from '@/components/dialogs/DbeaverDialog'
 import { GenerateDialog } from '@/components/dialogs/GenerateDialog'
 import { BackupDialog, ExportDialog, ImportDialog, RestoreDialog, TransferDialog } from '@/components/dialogs/IoDialogs'
 import { SettingsDialog } from '@/components/dialogs/SettingsDialog'
@@ -381,5 +382,7 @@ function DialogHost() {
       return <ValueDialog title={d.title} value={d.value} />
     case 'about':
       return <AboutDialog />
+    case 'dbeaver':
+      return <DbeaverDialog />
   }
 }

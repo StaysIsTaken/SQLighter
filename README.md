@@ -30,6 +30,7 @@ SQLighter ist wie DBeaver – nur aufgeräumt: links die Verbindungen (in Ordner
 **Verbindungen**
 - PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle (optional, siehe unten), CockroachDB
 - Verbindungen in **Ordnern und Unterordnern** organisieren (Drag & Drop), Farben, Suche
+- **Import aus DBeaver**: Verbindungen samt Ordnern, SSH-Tunnel, TLS-Einstellungen und (optional) gespeicherten Passwörtern übernehmen – die Passwörter landen direkt im System-Schlüsselbund
 - Markierung als **Produktion** (jede Änderung muss bestätigt werden) und **Read-only** (auch auf DB-Ebene erzwungen, wo möglich)
 - **SSH-Tunnel** (Passwort, privater Schlüssel, SSH-Agent) mit Host-Key-Prüfung
 
@@ -163,7 +164,7 @@ SQLIGHTER_IT=1 cargo test --test integration -- --test-threads=1   # gegen echte
 
 SQLighter is a desktop SQL client in the spirit of DBeaver, but calm and modern. It is built with **Tauri 2 (Rust)** and **React**.
 
-- **Databases**: PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle (via Oracle Instant Client at runtime), CockroachDB; connections organised in folders; SSH tunnels.
+- **Databases**: PostgreSQL, MySQL, MariaDB, SQLite, SQL Server, Oracle (via Oracle Instant Client at runtime), CockroachDB; connections organised in folders; SSH tunnels; import of DBeaver connections (folders, SSH, TLS and saved passwords).
 - **Editor & data**: dialect-aware editor with completion, formatter, statement-at-cursor execution, transactions, cancel, explain, history; virtualized grid with copy formats and inline editing (SQL preview, single transaction).
 - **SQL generator**: SELECT/INSERT/UPDATE/DELETE/UPSERT/MERGE/CREATE TABLE/DROP from tables or selected rows, including cross-dialect DDL.
 - **Import/export/backup**: CSV, TSV, XLSX, JSON, XML, SQL, Markdown, HTML; DB-to-DB transfer; portable SQL dumps or native `pg_dump`/`mysqldump`/SQLite backups; restore.

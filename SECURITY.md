@@ -31,6 +31,7 @@ Die TLS-Modi sind mit Integrationstests gegen einen echten PostgreSQL-Server mit
 - Konfigurationsdateien (`connections.json`, `settings.json`, `history.json`) enthalten **keine** Geheimnisse, werden atomar geschrieben und sind nur für den eigenen Benutzer lesbar (`0600`, Verzeichnis `0700`).
 - Ist kein Schlüsselbund verfügbar, bleiben Geheimnisse nur für die laufende Sitzung im Speicher (Anzeige in der Statusleiste).
 - „Passwort nicht speichern“ → Abfrage bei jeder Verbindung.
+- **DBeaver-Import**: DBeaver speichert Passwörter nur verschleiert (fester, öffentlich bekannter Schlüssel). SQLighter liest sie ausschließlich im Backend und legt sie direkt im Schlüsselbund ab; die Oberfläche sieht nur, *ob* ein Passwort existiert. Unverschlüsselte Verbindungen zu entfernten Hosts werden nur mit ausdrücklichem Häkchen als solche übernommen.
 - Passwörter für native Werkzeuge werden nie über die Kommandozeile übergeben (`PGPASSWORD` bzw. temporäre `--defaults-extra-file` mit `0600`, danach gelöscht).
 
 ## 4. Schutz vor Fehlbedienung

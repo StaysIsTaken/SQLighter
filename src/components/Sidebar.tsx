@@ -14,6 +14,7 @@ import {
   FolderOpen,
   FolderPlus,
   FunctionSquare,
+  Import,
   Hash,
   KeyRound,
   Layers,
@@ -572,6 +573,9 @@ export function Sidebar() {
         <button className="icon-btn" title={t('New folder')} onClick={() => newFolder(null)}>
           <FolderPlus size={16} />
         </button>
+        <button className="icon-btn" title={t('Import connections from DBeaver')} onClick={() => st.setDialog({ type: 'dbeaver' })}>
+          <Import size={16} />
+        </button>
         <button className="icon-btn" title={t('New connection')} onClick={() => st.setDialog({ type: 'connection' })}>
           <PlugZap size={16} />
         </button>
@@ -588,7 +592,8 @@ export function Sidebar() {
         onContextMenu={(e) =>
           menu.open(e, [
             { label: t('New connection…'), icon: <Plus size={14} />, onClick: () => st.setDialog({ type: 'connection' }) },
-            { label: t('New folder…'), icon: <FolderPlus size={14} />, onClick: () => newFolder(null) }
+            { label: t('New folder…'), icon: <FolderPlus size={14} />, onClick: () => newFolder(null) },
+            { label: t('Import from DBeaver…'), icon: <Import size={14} />, onClick: () => st.setDialog({ type: 'dbeaver' }) }
           ])
         }
       >
@@ -599,6 +604,9 @@ export function Sidebar() {
             <div>{t('No connections yet.')}</div>
             <button className="btn small primary" style={{ marginTop: 10 }} onClick={() => st.setDialog({ type: 'connection' })}>
               <Plus size={13} /> {t('New connection')}
+            </button>
+            <button className="btn small ghost" style={{ marginTop: 6 }} onClick={() => st.setDialog({ type: 'dbeaver' })}>
+              <Import size={13} /> {t('Import from DBeaver…')}
             </button>
           </div>
         )}

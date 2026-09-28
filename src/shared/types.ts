@@ -93,6 +93,25 @@ export interface ConnectionView extends ConnectionConfig {
   hasSshPassphrase: boolean
 }
 
+export interface DbeaverCandidate {
+  source: string
+  id: string
+  config: ConnectionConfig
+  folder: string[]
+  hasPassword: boolean
+  hasSshSecret: boolean
+  unencrypted: boolean
+  exists: boolean
+  warnings: string[]
+}
+
+export interface DbeaverScan {
+  sources: string[]
+  connections: DbeaverCandidate[]
+  skipped: { source: string; name: string; driver: string }[]
+  errors: string[]
+}
+
 export interface Folder {
   id: string
   name: string

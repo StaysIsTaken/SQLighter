@@ -12,6 +12,7 @@ import type {
   ConnectionSecrets,
   ConnectionTree,
   ConnectionView,
+  DbeaverScan,
   DbObject,
   ExecuteOptions,
   ExecuteResponse,
@@ -58,6 +59,9 @@ export const api = {
   deleteFolder: (id: string) => invoke<void>('delete_folder', { id }),
   moveItem: (kind: 'folder' | 'connection', id: string, folderId: string | null, order?: number) =>
     invoke<void>('move_item', { kind, id, folderId, order: order ?? null }),
+  dbeaverScan: (path?: string) => invoke<DbeaverScan>('dbeaver_scan', { path: path ?? null }),
+  dbeaverImport: (selections: { source: string; id: string }[], options: { passwords: boolean; allowInsecure: boolean }) =>
+    invoke<number>('dbeaver_import', { selections, options }),
   testConnection: (config: ConnectionConfig, secrets?: ConnectionSecrets) => invoke<TestResult>('test_connection', { config, secrets: secrets ?? null }),
   fetchServerCert: (config: ConnectionConfig, secrets?: ConnectionSecrets) => invoke<CertInfo>('fetch_server_cert', { config, secrets: secrets ?? null }),
   answerHostKey: (promptId: string, accept: boolean) => invoke<void>('answer_host_key', { promptId, accept }),

@@ -66,6 +66,7 @@ export type Dialog =
   | { type: 'confirm'; title: string; message: string; details?: string; danger?: boolean; confirmLabel?: string; onConfirm: () => void | Promise<void> }
   | { type: 'value'; title: string; value: string }
   | { type: 'about' }
+  | { type: 'dbeaver' }
 
 export interface Toast {
   id: number

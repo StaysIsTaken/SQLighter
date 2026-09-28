@@ -3,6 +3,7 @@
 pub mod ai;
 mod commands;
 pub mod db;
+pub mod dbeaver;
 pub mod error;
 pub mod io;
 pub mod mcp;
@@ -64,6 +65,8 @@ pub fn run() {
             commands::set_ai_api_key,
             commands::get_tree,
             commands::save_connection,
+            commands::dbeaver_scan,
+            commands::dbeaver_import,
             commands::delete_connection,
             commands::duplicate_connection,
             commands::save_folder,

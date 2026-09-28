@@ -112,6 +112,50 @@ pub fn move_item(state: S<'_>, kind: String, id: String, folder_id: Option<Strin
     Ok(state.store.move_item(&kind, &id, folder_id, order)?)
 }
 
+/// Finds DBeaver connections: in the default DBeaver workspaces, or in a data-sources file the
+/// user picked in a file dialog.
+#[tauri::command]
+pub async fn dbeaver_scan(state: S<'_>, path: Option<String>) -> AppResult<crate::dbeaver::ScanResult> {
+    use crate::dbeaver;
+    let files = match path {
+        Some(p) => vec![state.check_path(&p)?],
+        None => dbeaver::data_source_files(&dbeaver::workspaces()),
+    };
+    let mut res = dbeaver::ScanResult::default();
+    for f in files {
+        // Discovered files may be passed back to dbeaver_import.
+        state.approve_path(&f);
+        res.sources.push(f.to_string_lossy().into_owned());
+        match dbeaver::read_file(&f, &state.store) {
+            Ok(parsed) => {
+                let (ok, skipped) = dbeaver::split_supported(parsed);
+                res.connections.extend(ok.into_iter().map(|p| p.candidate));
+                res.skipped.extend(skipped);
+            }
+            Err(e) => res.errors.push(format!("{}: {}", f.display(), crate::error::chain_message(&e))),
+        }
+    }
+    Ok(res)
+}
+
+#[tauri::command]
+pub async fn dbeaver_import(state: S<'_>, selections: Vec<crate::dbeaver::Selection>, options: crate::dbeaver::ImportOptions) -> AppResult<usize> {
+    use crate::dbeaver;
+    let mut chosen = Vec::new();
+    let mut sources: Vec<&str> = selections.iter().map(|s| s.source.as_str()).collect();
+    sources.sort();
+    sources.dedup();
+    for src in sources {
+        let path = state.check_path(src)?;
+        let (ok, _) = dbeaver::split_supported(dbeaver::read_file(&path, &state.store)?);
+        chosen.extend(ok.into_iter().filter(|p| selections.iter().any(|s| s.source == src && s.id == p.candidate.id)));
+    }
+    for p in &chosen {
+        validate_connection(&p.candidate.config)?;
+    }
+    Ok(dbeaver::import(&state.store, chosen, &options)?)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestResult {
