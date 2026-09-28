@@ -9,7 +9,13 @@ use super::{cell_bool, cell_i64, cell_opt, cell_str, Conn};
 use crate::model::{ColumnInfo, DbObject, Dialect, ForeignKeyInfo, IndexInfo, ObjectKind, TableInfo};
 use crate::sql::{qualified, quote_ident, quote_literal};
 
+/// String literal for metadata queries. Schema and table names can come from AI agents / MCP
+/// clients, so the literal must be unambiguous: in PostgreSQL a plain '...' treats backslashes
+/// as escapes when standard_conforming_strings is off, an E'...' string always does.
 fn lit(s: &str, d: Dialect) -> String {
+    if d == Dialect::Postgres && s.contains('\\') {
+        return format!("E'{}'", s.replace('\\', "\\\\").replace('\'', "''"));
+    }
     quote_literal(&Value::String(s.to_string()), d, None)
 }
 
@@ -609,4 +615,17 @@ pub async fn schema_columns(c: &mut Conn, d: Dialect, schema: &str) -> Result<Ve
         Dialect::Oracle => format!("SELECT table_name, column_name, data_type FROM all_tab_columns WHERE owner = {s} ORDER BY table_name, column_id"),
     };
     Ok(c.rows(&sql).await.context("read schema")?.iter().map(|r| (cell_str(&r[0]), cell_str(&r[1]), cell_str(&r[2]))).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn literals_are_unambiguous() {
+        assert_eq!(lit("public", Dialect::Postgres), "'public'");
+        // With standard_conforming_strings=off, '\' would escape the closing quote.
+        assert_eq!(lit("x\\' OR 1=1 --", Dialect::Postgres), "E'x\\\\'' OR 1=1 --'");
+        assert_eq!(lit("x\\' OR 1=1 --", Dialect::Mysql), "'x\\\\'' OR 1=1 --'");
+    }
 }

@@ -46,6 +46,9 @@ Die TLS-Modi sind mit Integrationstests gegen einen echten PostgreSQL-Server mit
 
 - **Zugriffsstufen**: *kein Zugriff* (nichts über Datenbanken wird gesendet) · *nur Schema* (Tabellen-/Spaltennamen und Typen) · *Schema + lesende Abfragen*.
 - Lesende Abfragen: nur ein einzelnes `SELECT`/`WITH`/`SHOW`/`EXPLAIN` (ohne `ANALYZE`), max. 50 Zeilen, in einer **`READ ONLY`-Transaktion, die immer zurückgerollt wird** (SQLite: `PRAGMA query_only`), auf einer separaten Verbindung, mit Timeout.
+- SQL von KI-Agenten gilt als nicht vertrauenswürdig (Prompt-Injection über gelesene Daten). Es wird so zerlegt, wie die jeweilige Datenbank es tut; abgelehnt werden u. a. MySQL-„ausführbare Kommentare“ (`/*! … */`), `--` ohne folgendes Leerzeichen, Backslashes in Strings (deren Bedeutung von Servereinstellungen abhängt) sowie Funktionen, die über die Datenbank hinausgreifen (`pg_read_file`, `dblink`, `LOAD_FILE`, `OPENROWSET`, `UTL_HTTP`, `xp_*`, …). Bei MySQL/MariaDB läuft die Abfrage als Prepared Statement, der Server akzeptiert also nur eine einzige Anweisung.
+- SQL Server kennt keine Nur-Lesen-Transaktionen; Befehle, die ein Rollback nicht rückgängig macht (`KILL`, `SHUTDOWN`, `DBCC`, `BACKUP`, …), sind gesperrt.
+- **Empfehlung:** Für die Zugriffsstufe „Schema + lesende Abfragen“ einen Datenbankbenutzer mit minimalen Rechten verwenden (nur `SELECT`, kein Superuser/`FILE`-Recht).
 - Der eingebaute Assistent erhält **nie** ein Werkzeug zum Ändern von Daten; vorgeschlagenes SQL führt der Benutzer selbst aus (inkl. der Sicherheitsabfragen oben).
 - KI-Endpunkte müssen **HTTPS** verwenden; HTTP nur für Loopback-Adressen (z. B. lokales Ollama) oder mit ausdrücklicher Ausnahme pro Anbieter.
 - **Claude Code** wird mit `--tools ""` (keine eingebauten Werkzeuge, also keine Shell- oder Dateizugriffe), `--strict-mcp-config` und einer MCP-Konfiguration gestartet, die nur SQLighter enthält. Das dafür verwendete Token ist kurzlebig, an die aktuelle Verbindung und Zugriffsstufe gebunden und wird nach dem Aufruf widerrufen. Der Prompt wird über stdin übergeben.
@@ -56,6 +59,7 @@ Die TLS-Modi sind mit Integrationstests gegen einen echten PostgreSQL-Server mit
 - Jede Anfrage braucht ein **Bearer-Token** (256 Bit, Vergleich in konstanter Zeit).
 - **Host-Header-Prüfung** (Schutz vor DNS-Rebinding) und Ablehnung von Browser-Anfragen mit fremdem `Origin`.
 - Anfragegröße begrenzt (1 MB), keine Batch-Requests.
+- Datenzugriff folgt der KI-Zugriffsstufe; bei „Kein Datenbankzugriff“ sehen MCP-Clients keine Werkzeuge.
 - Schreibzugriff ist standardmäßig **aus**. Wenn aktiviert, muss **jedes** Statement im SQLighter-Fenster freigegeben werden.
 - Die Endpunkt-Datei für die Stdio-Bridge ist nur für den eigenen Benutzer lesbar; die Bridge sendet das Token nur an `127.0.0.1`/`localhost`.
 

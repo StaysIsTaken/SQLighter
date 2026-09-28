@@ -83,6 +83,19 @@ fn command(bin: &PathBuf) -> tokio::process::Command {
     cmd
 }
 
+struct Cleanup {
+    state: Arc<AppState>,
+    token: String,
+    path: PathBuf,
+}
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+        crate::mcp::revoke_token(&self.state, &self.token);
+    }
+}
+
 pub async fn chat(state: Arc<AppState>, p: &AiProviderConfig, system: String, context: String, req: &ChatRequest, scope: Scope, emit: &Emit) -> Result<()> {
     let bin = resolve(p.command.as_deref())?;
     if bin.extension().is_some_and(|e| e.eq_ignore_ascii_case("cmd") || e.eq_ignore_ascii_case("bat")) {
@@ -90,8 +103,10 @@ pub async fn chat(state: Arc<AppState>, p: &AiProviderConfig, system: String, co
     }
     let (url, token) = crate::mcp::ephemeral_token(state.clone(), scope.clone()).await?;
     let dir = state.store.dir().join("claude-code");
-    std::fs::create_dir_all(&dir)?;
     let cfg_path = dir.join(format!("mcp-{}.json", uuid::Uuid::new_v4()));
+    // Revokes the token and deletes the config file on every exit path, errors included.
+    let _cleanup = Cleanup { state: state.clone(), token: token.clone(), path: cfg_path.clone() };
+    std::fs::create_dir_all(&dir)?;
     let mcp_cfg = json!({"mcpServers": {"sqlighter": {"type": "http", "url": url, "headers": {"Authorization": format!("Bearer {token}")}}}});
     crate::store::write_private(&cfg_path, serde_json::to_string(&mcp_cfg)?.as_bytes())?;
 
@@ -205,8 +220,6 @@ pub async fn chat(state: Arc<AppState>, p: &AiProviderConfig, system: String, co
     }
     let status = child.wait().await?;
     let stderr = err_task.await.unwrap_or_default();
-    let _ = std::fs::remove_file(&cfg_path);
-    crate::mcp::revoke_token(&state, &token);
     if let Some(e) = result_error {
         bail!(e);
     }

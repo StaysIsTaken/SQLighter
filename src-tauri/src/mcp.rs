@@ -25,7 +25,7 @@ use tokio::sync::oneshot;
 
 use crate::ai::tools::{self, Scope};
 use crate::error::AppResult;
-use crate::model::{AiAccessLevel, McpInfo};
+use crate::model::McpInfo;
 use crate::state::AppState;
 
 const PROTOCOLS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -150,6 +150,17 @@ pub fn revoke_token(state: &AppState, token: &str) {
     state.mcp.tokens.lock().unwrap().remove(token);
 }
 
+/// Exactly http://127.0.0.1[:port] or http://localhost[:port] (a prefix check would also accept
+/// http://127.0.0.1.attacker.example).
+fn is_loopback_origin(origin: &str) -> bool {
+    let Some(rest) = origin.strip_prefix("http://") else { return false };
+    let (host, port) = match rest.rsplit_once(':') {
+        Some((h, p)) => (h, Some(p)),
+        None => (rest, None),
+    };
+    (host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost")) && port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
 fn rpc_error(id: Value, code: i64, msg: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": msg}})
 }
@@ -162,7 +173,7 @@ async fn handle(AxState((state, port)): AxState<(Arc<AppState>, u16)>, headers: 
     }
     // Browsers always send Origin for cross-site requests; MCP clients don't.
     if let Some(origin) = headers.get(header::ORIGIN).and_then(|h| h.to_str().ok()) {
-        if !(origin.starts_with("http://127.0.0.1") || origin.starts_with("http://localhost")) {
+        if !is_loopback_origin(origin) {
             return (StatusCode::FORBIDDEN, "cross-origin requests are not allowed").into_response();
         }
     }
@@ -186,7 +197,8 @@ async fn handle(AxState((state, port)): AxState<(Arc<AppState>, u16)>, headers: 
             let st = state.store.settings();
             Scope {
                 connection_id: None,
-                access: if st.ai_access == AiAccessLevel::None { AiAccessLevel::Schema } else { st.ai_access },
+                // "No database access" applies to MCP clients too: they then see no tools.
+                access: st.ai_access,
                 allow_write: st.mcp_allow_write,
                 allow_open_editor: true,
                 label: "MCP client".into(),
@@ -283,4 +295,19 @@ pub async fn mcp_regenerate_token(state: State<'_, Arc<AppState>>) -> AppResult<
     state.store.set_secret(TOKEN_KEY, &new_token());
     apply_settings(state.inner().clone()).await?;
     mcp_info(state).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origin_check_is_exact() {
+        for ok in ["http://127.0.0.1", "http://127.0.0.1:7433", "http://localhost:3000", "http://LOCALHOST"] {
+            assert!(is_loopback_origin(ok), "{ok}");
+        }
+        for bad in ["http://127.0.0.1.evil.example", "http://localhost.evil.example:80", "https://evil.example", "http://127.0.0.1:80@evil", "http://127.0.0.1:", "null", "file://"] {
+            assert!(!is_loopback_origin(bad), "{bad}");
+        }
+    }
 }

@@ -203,7 +203,7 @@ async fn native_backup(s: &crate::db::session::Session, o: &BackupOptions, p: &P
             if o.drop_statements && !custom {
                 cmd.arg("--clean").arg("--if-exists");
             }
-            cmd.arg(if cfg.database.is_empty() { "postgres" } else { &cfg.database });
+            cmd.arg(pg_dbname_arg(&cfg.database));
             // Secrets go through the environment, never the command line (visible in `ps`).
             if let Some(pw) = s.secrets().password.as_deref() {
                 cmd.env("PGPASSWORD", pw);
@@ -253,9 +253,9 @@ async fn native_backup(s: &crate::db::session::Session, o: &BackupOptions, p: &P
             if db.is_empty() {
                 bail!("Choose a database (schema) to back up");
             }
-            cmd.arg(&db);
+            cmd.arg(positional(&db)?);
             for t in o.tables.iter().flatten() {
-                cmd.arg(t);
+                cmd.arg(positional(t)?);
             }
             let r = run_tool(cmd).await;
             let _ = std::fs::remove_file(&tmp);
@@ -264,6 +264,22 @@ async fn native_backup(s: &crate::db::session::Session, o: &BackupOptions, p: &P
         }
         _ => bail!("Native backup is not available for {}. Use the SQL backup method.", cfg.db_type.label()),
     }
+}
+
+/// `--dbname` argument for libpq tools. A plain name would be parsed as a connection string
+/// ("host=other sslmode=disable" would send the password elsewhere without TLS) or, starting
+/// with '-', as an option.
+fn pg_dbname_arg(db: &str) -> String {
+    let db = if db.is_empty() { "postgres" } else { db };
+    format!("--dbname=dbname='{}'", db.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+/// Database and table names passed as positional arguments must not look like options.
+fn positional(name: &str) -> Result<&str> {
+    if name.starts_with('-') {
+        bail!("'{name}' cannot be passed to the native backup tool because it starts with '-'. Use the SQL backup method.");
+    }
+    Ok(name)
 }
 
 async fn tool_is_mariadb(bin: &Path) -> bool {
@@ -384,7 +400,7 @@ async fn pg_restore(s: &crate::db::session::Session, o: &RestoreOptions) -> Resu
     let (host, port) = endpoint(s).await?;
     let mut cmd = tokio::process::Command::new(bin);
     cmd.arg("--no-password").arg("-h").arg(&host).arg("-p").arg(port.to_string()).arg("-U").arg(&s.cfg.user);
-    cmd.arg("-d").arg(if s.cfg.database.is_empty() { "postgres" } else { &s.cfg.database });
+    cmd.arg(pg_dbname_arg(&s.cfg.database));
     if o.stop_on_error {
         cmd.arg("--exit-on-error");
     }
@@ -395,4 +411,20 @@ async fn pg_restore(s: &crate::db::session::Session, o: &RestoreOptions) -> Resu
     pg_ssl_env(&mut cmd, &s.cfg)?;
     run_tool(cmd).await?;
     Ok("pg_restore finished".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_tool_arguments() {
+        assert_eq!(pg_dbname_arg("shop"), "--dbname=dbname='shop'");
+        assert_eq!(pg_dbname_arg(""), "--dbname=dbname='postgres'");
+        // A connection string stays one quoted database name.
+        assert_eq!(pg_dbname_arg("x host=evil sslmode=disable"), "--dbname=dbname='x host=evil sslmode=disable'");
+        assert_eq!(pg_dbname_arg("a'b\\c"), "--dbname=dbname='a\\'b\\\\c'");
+        assert!(positional("--result-file=x").is_err());
+        assert_eq!(positional("shop").unwrap(), "shop");
+    }
 }

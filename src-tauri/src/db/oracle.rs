@@ -26,6 +26,13 @@ impl OraConn {
             None => (cfg.host.clone(), if cfg.port == 0 { 1521 } else { cfg.port }),
         };
         let service = cfg.service_name.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| cfg.database.clone());
+        // The values are inserted into a connect descriptor: parentheses or '=' would change its
+        // structure (e.g. switch TCPS to TCP or disable SSL_SERVER_DN_MATCH).
+        for (what, v) in [("host", host.as_str()), ("service name", service.as_str()), ("wallet directory", cfg.tls.ca_file.as_deref().unwrap_or(""))] {
+            if v.chars().any(|c| matches!(c, '(' | ')' | '=') || c.is_control()) {
+                anyhow::bail!("Invalid Oracle {what}: it must not contain '(', ')' or '='");
+            }
+        }
         let (protocol, security) = match cfg.tls.mode {
             TlsMode::Disabled => ("TCP", String::new()),
             TlsMode::VerifyFull => (
