@@ -1,7 +1,7 @@
 // AI assistant panel.
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Bot, Check, ClipboardCopy, CornerDownLeft, FilePlus2, Play, Plus, Replace, Send, Settings2, ShieldCheck, Square, Wrench, X } from 'lucide-react'
-import type { ChatEvent, ChatMessage } from '@shared/types'
+import { useEffect, useRef, useState } from 'react'
+import { AlertTriangle, ArrowDown, Bot, Check, ClipboardCopy, CornerDownLeft, FilePlus2, MessagesSquare, Play, Plus, Replace, Send, Settings2, ShieldCheck, Square, Trash2, Wrench, X } from 'lucide-react'
+import type { ChatEvent, ChatMessage, ChatSummary } from '@shared/types'
 import { api, errorMessage, events } from '@/lib/api'
 import { copyText } from '@/lib/format'
 import { t } from '@/lib/i18n'
@@ -28,14 +28,22 @@ export function askAi(text: string) {
   setTimeout(() => askListeners.forEach((l) => l(text)), 0)
 }
 
-const CHAT_KEY = 'sqlighter.chat.v1'
+/** Chat of earlier versions, kept in localStorage; moved into the chat list once. */
+const LEGACY_CHAT_KEY = 'sqlighter.chat.v1'
+const RETENTION_DAYS = 7
 
-function loadChat(): { messages: UiMessage[]; sessionId?: string } {
-  try {
-    return JSON.parse(localStorage.getItem(CHAT_KEY) ?? '') as { messages: UiMessage[]; sessionId?: string }
-  } catch {
-    return { messages: [] }
-  }
+function chatTitle(messages: UiMessage[]): string {
+  const first = messages.find((m) => m.role === 'user')?.content ?? ''
+  const line = first.replace(/\s+/g, ' ').trim()
+  return line.length > 60 ? line.slice(0, 57) + '…' : line || t('New chat')
+}
+
+function formatWhen(ts: number): string {
+  const d = new Date(ts)
+  const today = new Date()
+  return d.toDateString() === today.toDateString()
+    ? d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(undefined, { weekday: 'short', day: '2-digit', month: '2-digit' })
 }
 
 export function ChatPanel() {
@@ -46,9 +54,17 @@ export function ChatPanel() {
   const activeTabId = useStore((s) => s.activeTabId)
   const selectedConn = useStore((s) => s.selectedConnectionId)
   const { setDialog, openSqlTab } = useStore.getState()
-  const initial = useMemo(loadChat, [])
-  const [messages, setMessages] = useState<UiMessage[]>(initial.messages ?? [])
-  const [sessionId, setSessionId] = useState<string | undefined>(initial.sessionId)
+  const [messages, setMessages] = useState<UiMessage[]>([])
+  const [sessionId, setSessionId] = useState<string | undefined>()
+  const [chatId, setChatId] = useState(uid)
+  const createdAt = useRef(Date.now())
+  const [chats, setChats] = useState<ChatSummary[]>([])
+  const [showList, setShowList] = useState(false)
+  const [atBottom, setAtBottom] = useState(true)
+  // Follow new text only while the user is at the bottom; scrolling up stops following.
+  const stick = useRef(true)
+  // Only new messages count as activity: opening a chat must not extend its retention.
+  const dirty = useRef(false)
   const [input, setInput] = useState('')
   const [requestId, setRequestId] = useState<string | null>(null)
   const [providerId, setProviderId] = useState<string>(() => localStorage.getItem('sqlighter.chat.provider') ?? '')
@@ -65,13 +81,96 @@ export function ChatPanel() {
   const activeTab = tabs.find((x) => x.id === activeTabId)
   const schema = activeTab?.kind === 'sql' ? activeTab.schema : activeTab?.kind === 'table' ? activeTab.schema : undefined
 
+  const refreshChats = () =>
+    api
+      .chatList()
+      .then(setChats)
+      .catch(() => {})
+
+  const persist = (id: string, msgs: UiMessage[], session: string | undefined) => {
+    if (!msgs.some((m) => m.role === 'user')) return
+    api
+      .chatSave({ id, title: chatTitle(msgs), createdAt: createdAt.current, updatedAt: 0, sessionId: session, messages: msgs })
+      .then(refreshChats)
+      .catch(() => {})
+  }
+
+  // Initial load: migrate the old single chat, then open the most recent one.
   useEffect(() => {
-    try {
-      localStorage.setItem(CHAT_KEY, JSON.stringify({ messages: messages.slice(-60), sessionId }))
-    } catch {
-      /* ignore */
+    ;(async () => {
+      try {
+        const legacy = localStorage.getItem(LEGACY_CHAT_KEY)
+        if (legacy) {
+          const old = JSON.parse(legacy) as { messages?: UiMessage[]; sessionId?: string }
+          if (old.messages?.some((m) => m.role === 'user')) {
+            await api.chatSave({ id: uid(), title: chatTitle(old.messages), createdAt: 0, updatedAt: 0, sessionId: old.sessionId, messages: old.messages })
+          }
+          localStorage.removeItem(LEGACY_CHAT_KEY)
+        }
+      } catch {
+        /* ignore */
+      }
+      const list = await api.chatList().catch(() => [] as ChatSummary[])
+      setChats(list)
+      if (list[0]) await openChat(list[0].id)
+    })()
+  }, [])
+
+  // Save when an answer is complete (and after sending, see send()).
+  useEffect(() => {
+    if (requestId || !dirty.current) return
+    const h = setTimeout(() => {
+      dirty.current = false
+      persist(chatId, messages, sessionId)
+    }, 300)
+    return () => clearTimeout(h)
+  }, [messages, sessionId, requestId, chatId])
+
+  const scrollToBottom = () => {
+    const el = scroller.current
+    if (el) el.scrollTop = el.scrollHeight
+    stick.current = true
+    setAtBottom(true)
+  }
+
+  const openChat = async (id: string) => {
+    if (reqRef.current) api.aiCancel(reqRef.current)
+    setRequestId(null)
+    const c = await api.chatGet(id).catch(() => null)
+    if (!c) {
+      refreshChats()
+      return
     }
-  }, [messages, sessionId])
+    dirty.current = false
+    setChatId(c.id)
+    createdAt.current = c.createdAt
+    setMessages(c.messages as UiMessage[])
+    setSessionId(c.sessionId)
+    setShowList(false)
+    stick.current = true
+    setTimeout(scrollToBottom, 0)
+  }
+
+  const newChat = (keepList = false) => {
+    if (reqRef.current) api.aiCancel(reqRef.current)
+    dirty.current = false
+    setRequestId(null)
+    setChatId(uid())
+    createdAt.current = Date.now()
+    setMessages([])
+    setSessionId(undefined)
+    if (!keepList) {
+      setShowList(false)
+      setTimeout(() => inputRef.current?.focus(), 30)
+    }
+    stick.current = true
+  }
+
+  const deleteChat = async (id: string) => {
+    await api.chatDelete(id).catch(() => {})
+    if (id === chatId) newChat(true)
+    refreshChats()
+  }
 
   useEffect(() => {
     const l = (text: string) => {
@@ -87,6 +186,7 @@ export function ChatPanel() {
   useEffect(() => {
     const un = events.onAi((e: ChatEvent) => {
       if (e.requestId !== reqRef.current) return
+      dirty.current = true
       setMessages((ms) => {
         const copy = [...ms]
         const last = { ...copy[copy.length - 1] }
@@ -108,8 +208,20 @@ export function ChatPanel() {
 
   useEffect(() => {
     const el = scroller.current
-    if (el) el.scrollTop = el.scrollHeight
+    if (el && stick.current) el.scrollTop = el.scrollHeight
   }, [messages])
+
+  const onScroll = () => {
+    const el = scroller.current
+    if (!el) return
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    stick.current = bottom
+    setAtBottom(bottom)
+  }
+  // Scrolling up must win against new text arriving in the same frame.
+  const leaveBottom = () => {
+    stick.current = false
+  }
 
   // A different provider or connection starts a new Claude Code session.
   useEffect(() => setSessionId(undefined), [provider?.id, connectionId])
@@ -122,6 +234,11 @@ export function ChatPanel() {
     setMessages([...history, { role: 'assistant', content: '' }])
     setInput('')
     setRequestId(rid)
+    persist(chatId, history, sessionId)
+    dirty.current = true
+    setShowList(false)
+    stick.current = true
+    setTimeout(scrollToBottom, 0)
     const editorSql = includeEditor && activeTab?.kind === 'sql' ? editors.get(activeTab.id)?.getSql() : undefined
     try {
       if (connectionId && connState[connectionId]?.status !== 'connected' && settings?.aiAccess !== 'none') {
@@ -175,15 +292,16 @@ export function ChatPanel() {
         <Bot size={15} color="var(--accent)" />
         <span className="panel-title grow">{t('AI assistant')}</span>
         <button
-          className="icon-btn"
-          title={t('New chat')}
+          className={`icon-btn ${showList ? 'active' : ''}`}
+          title={t('Chats')}
           onClick={() => {
-            if (requestId) api.aiCancel(requestId)
-            setMessages([])
-            setSessionId(undefined)
-            setRequestId(null)
+            if (!showList) refreshChats()
+            setShowList(!showList)
           }}
         >
+          <MessagesSquare size={15} />
+        </button>
+        <button className="icon-btn" title={t('New chat')} onClick={() => newChat()}>
           <Plus size={16} />
         </button>
         <button className="icon-btn" title={t('AI settings')} onClick={() => setDialog({ type: 'settings', section: 'ai' })}>
@@ -214,7 +332,46 @@ export function ChatPanel() {
           <ShieldCheck size={11} /> {accessLabel}
         </span>
       </div>
-      <div className="chat-messages" ref={scroller}>
+      {showList && (
+        <div className="chat-list">
+          <button className="btn small primary" onClick={() => newChat()} style={{ alignSelf: 'flex-start' }}>
+            <Plus size={13} /> {t('New chat')}
+          </button>
+          {chats.map((c) => (
+            <div
+              key={c.id}
+              className={`chat-item ${c.id === chatId ? 'on' : ''}`}
+              onClick={() => openChat(c.id)}
+              title={t('Deleted automatically on {date}', { date: new Date(c.updatedAt + RETENTION_DAYS * 86400000).toLocaleDateString() })}
+            >
+              <MessagesSquare size={13} className="muted" />
+              <span className="grow ellipsis">{c.title}</span>
+              <span className="small muted">{formatWhen(c.updatedAt)}</span>
+              <button
+                className="icon-btn sm"
+                title={t('Delete chat')}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  deleteChat(c.id)
+                }}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          ))}
+          {!chats.length && <div className="hint">{t('No saved chats yet.')}</div>}
+          <div className="hint">{t('Chats are deleted automatically 7 days after the last message.')}</div>
+        </div>
+      )}
+      <div className="chat-scroll" style={showList ? { display: 'none' } : undefined}>
+      <div
+        className="chat-messages"
+        ref={scroller}
+        onScroll={onScroll}
+        onWheel={(e) => e.deltaY < 0 && leaveBottom()}
+        onTouchMove={leaveBottom}
+        onKeyDown={(e) => ['ArrowUp', 'PageUp', 'Home'].includes(e.key) && leaveBottom()}
+      >
         {messages.length === 0 && (
           <div className="chat-empty">
             <Bot size={30} style={{ opacity: 0.6 }} />
@@ -258,6 +415,12 @@ export function ChatPanel() {
             </div>
           )
         )}
+      </div>
+      {!atBottom && messages.length > 0 && (
+        <button className="scroll-bottom" title={t('Scroll to the end')} onClick={scrollToBottom}>
+          <ArrowDown size={15} />
+        </button>
+      )}
       </div>
       <div className="chat-input">
         <textarea

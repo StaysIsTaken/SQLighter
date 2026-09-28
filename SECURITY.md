@@ -28,6 +28,7 @@ Die TLS-Modi sind mit Integrationstests gegen einen echten PostgreSQL-Server mit
 ## 3. Geheimnisse / Secrets
 
 - Passwörter, SSH-Passphrasen, API-Schlüssel und das MCP-Token liegen im **Schlüsselbund des Betriebssystems** (macOS Keychain, Windows Credential Manager, Secret Service/libsecret).
+- KI-Chats liegen in `chats.json` (ebenfalls `0600`) und werden **7 Tage nach der letzten Nachricht automatisch gelöscht**; einzelne Chats lassen sich jederzeit löschen.
 - Konfigurationsdateien (`connections.json`, `settings.json`, `history.json`) enthalten **keine** Geheimnisse, werden atomar geschrieben und sind nur für den eigenen Benutzer lesbar (`0600`, Verzeichnis `0700`).
 - Ist kein Schlüsselbund verfügbar, bleiben Geheimnisse nur für die laufende Sitzung im Speicher (Anzeige in der Statusleiste).
 - „Passwort nicht speichern“ → Abfrage bei jeder Verbindung.

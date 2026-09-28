@@ -1002,6 +1002,63 @@ button {
 
 /* ---------------------------------------------------------------- chat */
 
+.chat-scroll {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.scroll-bottom {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.scroll-bottom:hover {
+  color: var(--accent);
+}
+.chat-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+  min-width: 0;
+}
+.chat-item:hover {
+  background: var(--hover);
+}
+.chat-item.on {
+  background: var(--accent-bg);
+}
+.chat-item .icon-btn {
+  opacity: 0;
+}
+.chat-item:hover .icon-btn,
+.chat-item.on .icon-btn {
+  opacity: 1;
+}
 .chat-messages {
   flex: 1;
   overflow: auto;

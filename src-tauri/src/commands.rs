@@ -156,6 +156,28 @@ pub async fn dbeaver_import(state: S<'_>, selections: Vec<crate::dbeaver::Select
     Ok(dbeaver::import(&state.store, chosen, &options)?)
 }
 
+// --- AI chats ------------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn chat_list(state: S<'_>) -> AppResult<Vec<crate::chats::ChatSummary>> {
+    Ok(crate::chats::list(&state.store)?)
+}
+
+#[tauri::command]
+pub fn chat_get(state: S<'_>, id: String) -> Option<crate::chats::ChatThread> {
+    crate::chats::get(&state.store, &id)
+}
+
+#[tauri::command]
+pub fn chat_save(state: S<'_>, chat: crate::chats::ChatThread) -> AppResult<()> {
+    Ok(crate::chats::save(&state.store, chat)?)
+}
+
+#[tauri::command]
+pub fn chat_delete(state: S<'_>, id: String) -> AppResult<()> {
+    Ok(crate::chats::delete(&state.store, &id)?)
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TestResult {

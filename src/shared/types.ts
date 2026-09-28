@@ -393,6 +393,22 @@ export interface ChatRequest {
   sessionId?: string
 }
 
+export interface ChatThread {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  sessionId?: string
+  messages: unknown[]
+}
+
+export interface ChatSummary {
+  id: string
+  title: string
+  updatedAt: number
+  messageCount: number
+}
+
 export type ChatEvent =
   | { requestId: string; type: 'text'; text: string }
   | { requestId: string; type: 'tool'; name: string; detail: string }

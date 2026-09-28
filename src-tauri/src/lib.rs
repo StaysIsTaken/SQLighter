@@ -1,6 +1,7 @@
 //! SQLighter - a modern, minimal and secure SQL client.
 
 pub mod ai;
+pub mod chats;
 mod commands;
 pub mod db;
 pub mod dbeaver;
@@ -67,6 +68,10 @@ pub fn run() {
             commands::save_connection,
             commands::dbeaver_scan,
             commands::dbeaver_import,
+            commands::chat_list,
+            commands::chat_get,
+            commands::chat_save,
+            commands::chat_delete,
             commands::delete_connection,
             commands::duplicate_connection,
             commands::save_folder,

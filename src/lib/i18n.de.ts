@@ -511,4 +511,10 @@ export const de: Record<string, string> = {
   '{model} (not in list)': '{model} (nicht in der Liste)',
   'Other model…': 'Anderes Modell eingeben…',
   'The conversation is too long for this local model: the beginning (instructions, your question) may be cut off. Start a new chat, ask more specifically, or use a model with a larger context window.': 'Das Gespräch ist zu lang für dieses lokale Modell: Der Anfang (Anweisungen, deine Frage) wird eventuell abgeschnitten. Starte einen neuen Chat, frag gezielter oder nutze ein Modell mit größerem Kontextfenster.',
+  'Chats': 'Chats',
+  'Deleted automatically on {date}': 'Wird am {date} automatisch gelöscht',
+  'Delete chat': 'Chat löschen',
+  'No saved chats yet.': 'Noch keine gespeicherten Chats.',
+  'Chats are deleted automatically 7 days after the last message.': 'Chats werden 7 Tage nach der letzten Nachricht automatisch gelöscht.',
+  'Scroll to the end': 'Zum Ende springen',
 }
