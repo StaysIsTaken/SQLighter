@@ -1,7 +1,7 @@
 // Virtualized data grid: selection, copy, sort, inline editing, context menu.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as RKeyboardEvent } from 'react'
 import { ArrowDown, ArrowUp, ClipboardCopy, Eye, FileJson, KeyRound, Table2 } from 'lucide-react'
-import type { CellValue, ColumnMeta } from '@shared/types'
+import type { CellValue, ColumnInfo, ColumnMeta } from '@shared/types'
 import { copyText, displayValue, isNumericType, rawValue, toDelimited, toJson, toMarkdown } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { useStore } from '@/lib/store'
@@ -15,11 +15,18 @@ export interface GridSelection {
   cols: number[]
 }
 
+/** Where a result column comes from (shown in the header tooltip, key icon for primary keys). */
+export interface SourceColumn {
+  table: string
+  column: ColumnInfo
+}
+
 export interface GridProps {
   columns: ColumnMeta[]
   rows: CellValue[][]
   editable?: boolean
   pkColumns?: string[]
+  sourceColumns?: Record<string, SourceColumn>
   edits?: Map<number, Map<number, CellValue>>
   rowState?: (row: number) => 'new' | 'deleted' | undefined
   onEditCell?: (row: number, col: number, value: CellValue) => void
@@ -276,6 +283,41 @@ export function ResultGrid(props: GridProps) {
     else setLocalSort((s) => (s && s.col === c ? (s.desc ? null : { col: c, desc: true }) : { col: c, desc: false }))
   }
 
+  const selectAll = () => {
+    if (!rows.length || !columns.length) return
+    setAnchor({ r: 0, c: 0 })
+    setFocus({ r: rows.length - 1, c: columns.length - 1 })
+    scroller.current?.focus()
+  }
+
+  const selectColumn = (c: number) => {
+    if (!rows.length) return
+    setAnchor({ r: 0, c })
+    setFocus({ r: rows.length - 1, c })
+    scroller.current?.focus()
+  }
+
+  const copyNames = (names: string[], sep: string) =>
+    copyText(names.join(sep)).then(() => toast(names.length === 1 ? t('Column name copied') : t('{count} column names copied', { count: String(names.length) }), 'success'))
+
+  const openHeaderMenu = (e: React.MouseEvent, c: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const sel = selection()
+    const selected = sel.cols.length > 1 && sel.cols.includes(c) ? sel.cols.map((i) => columns[i].name) : null
+    const all = columns.map((x) => x.name)
+    const items: MenuItem[] = [
+      { label: t('Copy column name'), icon: <ClipboardCopy size={14} />, onClick: () => copyNames([columns[c].name], '') },
+      ...(selected ? [{ label: t('Copy selected column names'), onClick: () => copyNames(selected, ', ') }] : []),
+      { label: t('Copy all column names'), icon: <Table2 size={14} />, onClick: () => copyNames(all, ', ') },
+      { label: t('Copy all column names (one per line)'), onClick: () => copyNames(all, '\n') },
+      { separator: true },
+      { label: t('Select column'), onClick: () => selectColumn(c), disabled: !rows.length },
+      { label: t('Select all'), shortcut: 'Ctrl+A', onClick: selectAll, disabled: !rows.length }
+    ]
+    menu.open(e, items)
+  }
+
   const openMenu = (e: React.MouseEvent) => {
     const sel = selection()
     const items: MenuItem[] = [
@@ -297,7 +339,22 @@ export function ResultGrid(props: GridProps) {
   const visible: number[] = []
   for (let i = first; i < last; i++) visible.push(i)
   const numeric = useMemo(() => columns.map((c) => isNumericType(c.type)), [columns])
-  const pkSet = useMemo(() => new Set(props.pkColumns ?? []), [props.pkColumns])
+  const pkSet = useMemo(() => {
+    const s = new Set(props.pkColumns ?? [])
+    for (const [name, src] of Object.entries(props.sourceColumns ?? {})) if (src.column.isPrimaryKey) s.add(name)
+    return s
+  }, [props.pkColumns, props.sourceColumns])
+  const headerTitle = (c: ColumnMeta) => {
+    const src = props.sourceColumns?.[c.name]
+    const type = src?.column.dataType ?? c.type ?? ''
+    return [
+      `${t('Column')}: ${c.name}${type ? ` ${type}` : ''}${src && !src.column.nullable ? ' NOT NULL' : ''}`,
+      src ? `${t('Table')}: ${src.table}` : '',
+      pkSet.has(c.name) ? t('Part of the primary key') : ''
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
 
   return (
     <div
@@ -310,7 +367,7 @@ export function ResultGrid(props: GridProps) {
     >
       <div className="grid-inner" style={{ width: offsets.total, height: rows.length * ROW_H + 30 }}>
         <div className="grid-header" style={{ width: offsets.total }}>
-          <div className="grid-rownum" style={{ width: RN_W }}>
+          <div className="grid-rownum" style={{ width: RN_W, cursor: 'pointer', textAlign: 'center' }} title={t('Select all')} onMouseDown={(e) => (e.preventDefault(), selectAll())}>
             #
           </div>
           {columns.map((c, ci) => (
@@ -318,11 +375,12 @@ export function ResultGrid(props: GridProps) {
               key={ci}
               className="grid-hcell"
               style={{ width: widths[ci] }}
-              title={`${c.name}${c.type ? ` (${c.type})` : ''}`}
+              title={headerTitle(c)}
               onClick={() => onHeaderClick(ci)}
+              onContextMenu={(e) => openHeaderMenu(e, ci)}
             >
               <span className="hname">
-                {pkSet.has(c.name) && <KeyRound size={11} color="var(--warn)" />}
+                {pkSet.has(c.name) && <KeyRound size={11} color="var(--warn)" style={{ flex: 'none' }} aria-label={t('Primary key')} />}
                 <span className="ellipsis">{c.name}</span>
                 {sort?.col === ci && (sort.desc ? <ArrowDown size={12} /> : <ArrowUp size={12} />)}
               </span>

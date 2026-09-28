@@ -18,15 +18,16 @@ import {
   Undo2,
   Wand2
 } from 'lucide-react'
-import type { Dialect, QueryResult } from '@shared/types'
+import type { Dialect, QueryResult, TableInfo } from '@shared/types'
 import { dialectOf } from '@shared/types'
 import { statementAt } from '@shared/sql'
+import { tableRefs } from '@shared/sqlcontext'
 import { api, errorMessage } from '@/lib/api'
 import { formatCount, formatDuration } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { editors, useStore, type SqlTab as SqlTabT } from '@/lib/store'
 import { Editor } from './Editor'
-import { ResultGrid } from './ResultGrid'
+import { ResultGrid, type SourceColumn } from './ResultGrid'
 import { HSplitter, usePersistentState } from './ui'
 import { askAi } from './ChatPanel'
 
@@ -61,6 +62,53 @@ export function useCompletion(connectionId: string | null, schema: string | unde
     }
   }, [connectionId, schema, connected])
   return schemaMap
+}
+
+const describeCache = new Map<string, Promise<TableInfo | null>>()
+
+function describeCached(connectionId: string, schema: string, name: string): Promise<TableInfo | null> {
+  const key = `${connectionId}|${schema}|${name}`
+  let p = describeCache.get(key)
+  if (!p) {
+    p = api.describeTable(connectionId, schema, name).catch(() => null)
+    describeCache.set(key, p)
+    setTimeout(() => describeCache.delete(key), 60_000)
+  }
+  return p
+}
+
+/**
+ * Source table and column of each result column: the tables of the top-level FROM/JOIN are
+ * described and a result column is assigned when exactly one of them has a column of that name
+ * (renamed or ambiguous columns stay unassigned, so no wrong key icon is shown).
+ */
+function useResultSources(connectionId: string | null, schema: string | undefined, result: QueryResult | undefined) {
+  const [sources, setSources] = useState<Record<string, SourceColumn> | undefined>()
+  useEffect(() => {
+    setSources(undefined)
+    if (!connectionId || !result?.isResultSet || !result.columns.length) return
+    const refs = tableRefs(result.statement, true).slice(0, 6)
+    if (!refs.length) return
+    let alive = true
+    Promise.all(refs.map((r) => describeCached(connectionId, r.schema ?? schema ?? '', r.name))).then((infos) => {
+      const tables = infos.filter((x): x is TableInfo => !!x)
+      const lc = (s: string) => s.toLowerCase()
+      const out: Record<string, SourceColumn> = {}
+      for (const c of result.columns) {
+        const owners = tables.filter((tb) => tb.columns.some((x) => lc(x.name) === lc(c.name)))
+        if (owners.length !== 1) continue
+        const tb = owners[0]
+        const col = tb.columns.find((x) => lc(x.name) === lc(c.name))!
+        const isPrimaryKey = col.isPrimaryKey || tb.primaryKey.some((p) => lc(p) === lc(c.name))
+        out[c.name] = { table: tb.schema ? `${tb.schema}.${tb.name}` : tb.name, column: { ...col, isPrimaryKey } }
+      }
+      if (alive) setSources(out)
+    })
+    return () => {
+      alive = false
+    }
+  }, [connectionId, schema, result])
+  return sources
 }
 
 export function SqlTab({ tab, visible }: { tab: SqlTabT; visible: boolean }) {
@@ -211,6 +259,7 @@ export function SqlTab({ tab, visible }: { tab: SqlTabT; visible: boolean }) {
 
   const txManual = connState?.autoCommit === false
   const current = results[activeResult]
+  const sourceColumns = useResultSources(tab.connectionId, schema, current)
   const filteredRows = useMemo(() => {
     if (!current || !filter.trim()) return current?.rows ?? []
     const f = filter.toLowerCase()
@@ -407,6 +456,7 @@ export function SqlTab({ tab, visible }: { tab: SqlTabT; visible: boolean }) {
               <ResultGrid
                 columns={current.columns}
                 rows={filteredRows}
+                sourceColumns={sourceColumns}
                 extraMenu={(sel) => [
                   {
                     label: t('Generate SQL for selected rows…'),

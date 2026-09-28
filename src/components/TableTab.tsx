@@ -303,6 +303,7 @@ function DataView({ tab, info, dialect, readOnly }: { tab: TableTabT; info: Tabl
           rows={rows}
           editable={editable}
           pkColumns={info?.primaryKey}
+          sourceColumns={info ? Object.fromEntries(info.columns.map((c) => [c.name, { table: `${info.schema}.${info.name}`, column: c }])) : undefined}
           edits={edits}
           rowState={rowState}
           onEditCell={onEditCell}
