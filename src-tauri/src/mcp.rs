@@ -227,7 +227,8 @@ async fn handle(AxState((state, port)): AxState<(Arc<AppState>, u16)>, headers: 
                 "protocolVersion": version,
                 "capabilities": {"tools": {"listChanged": false}},
                 "serverInfo": {"name": "sqlighter", "title": "SQLighter", "version": env!("CARGO_PKG_VERSION")},
-                "instructions": "SQLighter gives access to the user's database connections. Inspect schemas with list_tables / describe_table before writing SQL. \
+                "instructions": "SQLighter gives access to the user's database connections. Inspect schemas before writing SQL: list_schemas, list_tables / list_objects, \
+                                 describe_table, search_columns (find columns by name), list_relationships (foreign keys / JOIN columns) and get_ddl. \
                                  Propose SQL to the user; use open_in_editor to hand longer scripts over for review."
             }))
         }

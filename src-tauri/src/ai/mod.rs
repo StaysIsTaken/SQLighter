@@ -90,7 +90,13 @@ fn system_prompt(access: AiAccessLevel, dialect: Option<Dialect>, has_tools: boo
         s.push_str(&format!("- Target SQL dialect: {d:?}. Use syntax that works for this database.\n"));
     }
     if has_tools {
-        s.push_str("- Use the available tools to inspect tables before writing SQL for tables you have not seen yet.\n");
+        s.push_str(
+            "- Explore the database yourself with the tools; never ask the user to run queries or paste DDL to show you the schema.\n\
+             - Before writing SQL for tables you have not seen yet, inspect them: describe_table (several at once with 'tables'), \
+             search_columns to find where a column/value lives, list_relationships for JOIN columns, get_ddl for views and procedures, \
+             list_objects / list_schemas for other kinds of objects and schemas.\n\
+             - Never guess table or column names; look them up when unsure.\n",
+        );
     }
     if access == AiAccessLevel::Read {
         s.push_str("- run_query executes read-only statements only; use it sparingly (LIMIT your queries).\n");

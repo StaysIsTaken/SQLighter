@@ -11,7 +11,8 @@ use super::tools::ToolDef;
 use super::{Emit, ToolRunner};
 use crate::model::{AiProviderConfig, AiProviderKind, ChatMessage};
 
-const MAX_TOOL_ROUNDS: usize = 10;
+// Exploring an unknown schema (search columns, describe, relationships) takes several rounds.
+const MAX_TOOL_ROUNDS: usize = 20;
 
 pub fn client() -> Result<reqwest::Client> {
     Ok(reqwest::Client::builder()

@@ -617,6 +617,63 @@ pub async fn schema_columns(c: &mut Conn, d: Dialect, schema: &str) -> Result<Ve
     Ok(c.rows(&sql).await.context("read schema")?.iter().map(|r| (cell_str(&r[0]), cell_str(&r[1]), cell_str(&r[2]))).collect())
 }
 
+/// A foreign key together with the table that owns it.
+#[derive(Debug, Clone)]
+pub struct ForeignKeyEdge {
+    pub schema: String,
+    pub table: String,
+    pub fk: ForeignKeyInfo,
+}
+
+/// All foreign keys that start or end in `schema` (incoming references from other schemas
+/// included where the database exposes them), used to explain how tables can be joined.
+pub async fn schema_foreign_keys(c: &mut Conn, d: Dialect, schema: &str) -> Result<Vec<ForeignKeyEdge>> {
+    let s = lit(schema, d);
+    // Rows: schema, table, constraint, column, ref schema, ref table, ref column (in column order).
+    let sql = match d {
+        Dialect::Postgres => format!(
+            "SELECT tn.nspname, tc.relname, con.conname, a.attname, fn.nspname, fc.relname, fa.attname              FROM pg_constraint con              JOIN pg_class tc ON tc.oid = con.conrelid JOIN pg_namespace tn ON tn.oid = tc.relnamespace              JOIN pg_class fc ON fc.oid = con.confrelid JOIN pg_namespace fn ON fn.oid = fc.relnamespace              CROSS JOIN LATERAL unnest(con.conkey, con.confkey) WITH ORDINALITY k(col, refcol, o)              JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.col              JOIN pg_attribute fa ON fa.attrelid = con.confrelid AND fa.attnum = k.refcol              WHERE con.contype = 'f' AND (tn.nspname = {s} OR fn.nspname = {s})              ORDER BY tn.nspname, tc.relname, con.conname, k.o"
+        ),
+        Dialect::Mysql => format!(
+            "SELECT TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_SCHEMA, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME              FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_NAME IS NOT NULL AND (TABLE_SCHEMA = {s} OR REFERENCED_TABLE_SCHEMA = {s})              ORDER BY TABLE_SCHEMA, TABLE_NAME, CONSTRAINT_NAME, ORDINAL_POSITION"
+        ),
+        Dialect::Sqlite => format!(
+            "SELECT {s}, m.name, 'fk_' || m.name || '_' || p.id, p.\"from\", {s}, p.\"table\", p.\"to\"              FROM {q}.sqlite_master m JOIN pragma_foreign_key_list(m.name, {s}) p WHERE m.type = 'table' ORDER BY m.name, p.id, p.seq",
+            q = quote_ident(schema, d)
+        ),
+        Dialect::Mssql => format!(
+            "SELECT ts.name, t.name, fk.name, tcol.name, rs.name, rt.name, rcol.name              FROM sys.foreign_key_columns fkc JOIN sys.foreign_keys fk ON fk.object_id = fkc.constraint_object_id              JOIN sys.tables t ON t.object_id = fkc.parent_object_id JOIN sys.schemas ts ON ts.schema_id = t.schema_id              JOIN sys.columns tcol ON tcol.object_id = fkc.parent_object_id AND tcol.column_id = fkc.parent_column_id              JOIN sys.tables rt ON rt.object_id = fkc.referenced_object_id JOIN sys.schemas rs ON rs.schema_id = rt.schema_id              JOIN sys.columns rcol ON rcol.object_id = fkc.referenced_object_id AND rcol.column_id = fkc.referenced_column_id              WHERE ts.name = {s} OR rs.name = {s} ORDER BY ts.name, t.name, fk.name, fkc.constraint_column_id"
+        ),
+        Dialect::Oracle => format!(
+            "SELECT c.owner, c.table_name, c.constraint_name, cc.column_name, r.owner, r.table_name, rc.column_name              FROM all_constraints c JOIN all_cons_columns cc ON cc.owner = c.owner AND cc.constraint_name = c.constraint_name              JOIN all_constraints r ON r.owner = c.r_owner AND r.constraint_name = c.r_constraint_name              JOIN all_cons_columns rc ON rc.owner = r.owner AND rc.constraint_name = r.constraint_name AND rc.position = cc.position              WHERE c.constraint_type = 'R' AND (c.owner = {s} OR r.owner = {s}) ORDER BY c.owner, c.table_name, c.constraint_name, cc.position"
+        ),
+    };
+    let mut out: Vec<ForeignKeyEdge> = vec![];
+    for r in c.rows(&sql).await.context("read foreign keys")? {
+        let (sc, table, name) = (cell_str(&r[0]), cell_str(&r[1]), cell_str(&r[2]));
+        match out.last_mut() {
+            Some(e) if e.schema == sc && e.table == table && e.fk.name == name => {
+                e.fk.columns.push(cell_str(&r[3]));
+                e.fk.ref_columns.push(cell_str(&r[6]));
+            }
+            _ => out.push(ForeignKeyEdge {
+                schema: sc,
+                table,
+                fk: ForeignKeyInfo {
+                    name,
+                    columns: vec![cell_str(&r[3])],
+                    ref_schema: cell_str(&r[4]),
+                    ref_table: cell_str(&r[5]),
+                    ref_columns: vec![cell_str(&r[6])],
+                    on_delete: None,
+                    on_update: None,
+                },
+            }),
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -159,6 +159,12 @@ async fn common_suite(s: &Session, schema: &str) {
     assert!(o.indexes.iter().any(|i| i.columns == vec!["user_id"]), "{:?}", o.indexes);
     let ddl = metadata::ddl(c, d, schema, "it_users", ObjectKind::Table).await.unwrap();
     assert!(ddl.to_uppercase().contains("CREATE TABLE"), "{ddl}");
+    // Schema-wide relationships for the AI tools (list_relationships / schema context).
+    let fks = metadata::schema_foreign_keys(c, d, schema).await.unwrap();
+    let fk = fks.iter().find(|e| e.table == "it_orders").unwrap_or_else(|| panic!("{fks:?}"));
+    assert_eq!((fk.fk.columns.as_slice(), fk.fk.ref_table.as_str(), fk.fk.ref_columns.as_slice()), (&["user_id".to_string()][..], "it_users", &["id".to_string()][..]));
+    assert_eq!(fk.schema, schema);
+    assert_eq!(fk.fk.ref_schema, schema);
 
     // Generated DDL can recreate the table in the same database
     let stmts = sqlgen::create_table(&t, d, &sqlgen::CreateOpts { to: d, schema, name: "it_users_copy", foreign_keys: false, indexes: true });

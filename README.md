@@ -59,7 +59,7 @@ SQLighter ist wie DBeaver – nur aufgeräumt: links die Verbindungen (in Ordner
 
 **KI-Assistent**
 - **Ollama** (lokal), **OpenAI-kompatible APIs** (OpenAI, LM Studio, OpenRouter, vLLM, …), **Claude über die Anthropic-API** und **Claude Code** (lokale CLI mit deinem Abo)
-- Der Assistent kennt Dialekt und Schema, nutzt Werkzeuge (`list_tables`, `describe_table`, optional read-only `run_query`) und schreibt SQL, das du mit einem Klick einfügst, ersetzt oder ausführst
+- Der Assistent kennt Dialekt, Schema und Fremdschlüssel und erkundet die Datenbank selbst mit Werkzeugen (`list_schemas`, `list_tables`, `list_objects`, `describe_table`, `search_columns`, `list_relationships`, `get_ddl`, optional read-only `run_query`) und schreibt SQL, das du mit einem Klick einfügst, ersetzt oder ausführst
 - **Claude Desktop / Cowork und Claude Code** können SQLighter über den eingebauten **MCP-Server** nutzen (Tabellen ansehen, SQL im Editor öffnen, auf Wunsch Änderungen nach deiner Freigabe ausführen)
 
 **Oberfläche**: Deutsch und Englisch, dunkles und helles Design, anpassbare Panels, Tastenkürzel.
@@ -113,7 +113,7 @@ Einstellungen → **MCP · Claude Code / Cowork** → „MCP-Server aktivieren�
 - den Befehl für **Claude Code**: `claude mcp add --transport http sqlighter http://127.0.0.1:47821/mcp --header "Authorization: Bearer …"`
 - die Konfiguration für **Claude Desktop / Cowork** (nutzt die mitgelieferte Stdio-Bridge `sqlighter-mcp-bridge.mjs`, benötigt Node.js)
 
-Verfügbare Werkzeuge: `list_connections`, `list_tables`, `describe_table`, `run_query` (nur mit Stufe „lesende Abfragen“), `open_in_editor` und – nur wenn freigeschaltet – `execute_sql` mit Bestätigung in SQLighter.
+Verfügbare Werkzeuge: `list_connections`, `list_schemas`, `list_tables`, `list_objects` (Views, Funktionen, Prozeduren, Sequenzen), `describe_table` (auch mehrere Tabellen auf einmal), `search_columns` (Spalten über alle Tabellen suchen), `list_relationships` (Fremdschlüssel / JOIN-Spalten), `get_ddl` (CREATE-Statement inkl. View-Abfrage und Prozedur-Code), `run_query` (nur mit Stufe „lesende Abfragen“), `open_in_editor` und – nur wenn freigeschaltet – `execute_sql` mit Bestätigung in SQLighter.
 
 ## Tastenkürzel
 
