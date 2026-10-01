@@ -260,6 +260,20 @@ pub async fn disconnect(state: S<'_>, id: String) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub async fn reconnect(state: S<'_>, id: String) -> AppResult<SchemaSummary> {
+    let s = state.reconnect(&id).await?;
+    summary(&s).await
+}
+
+/// Health check of an open connection; re-opens it if the server dropped it. Returns whether a
+/// transaction is open. Fails if the server cannot be reached (or the connection is not open).
+#[tauri::command]
+pub async fn ping_connection(state: S<'_>, id: String) -> AppResult<bool> {
+    let s = state.sessions.read().await.get(&id).cloned().ok_or_else(|| app_err!("not connected"))?;
+    Ok(s.health().await?)
+}
+
+#[tauri::command]
 pub async fn connected_ids(state: S<'_>) -> AppResult<Vec<String>> {
     Ok(state.sessions.read().await.keys().cloned().collect())
 }

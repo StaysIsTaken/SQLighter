@@ -69,6 +69,23 @@ impl AppState {
         Ok(s)
     }
 
+    /// Replaces a session with a freshly opened one (new SSH tunnel, new connections). Uses the
+    /// secrets of the existing session, so a password typed at connect time is not asked again.
+    pub async fn reconnect(&self, id: &str) -> Result<Arc<Session>> {
+        let old = self.sessions.read().await.get(id).cloned();
+        let Some(old) = old else { return self.connect(id, None).await };
+        let cfg = self.store.connection(id).context("connection not found")?;
+        let auto_commit = old.auto_commit.load(std::sync::atomic::Ordering::SeqCst);
+        let (session, new_fp) = Session::open(cfg, old.secrets().clone(), self.host_key_prompt(), auto_commit).await?;
+        if let Some(fp) = new_fp {
+            self.store.update_connection(|c| c.ssh.host_key_fingerprint = Some(fp), id)?;
+        }
+        let s = Arc::new(session);
+        self.sessions.write().await.insert(id.to_string(), s.clone());
+        old.close().await;
+        Ok(s)
+    }
+
     pub async fn disconnect(&self, id: &str) {
         let s = self.sessions.write().await.remove(id);
         if let Some(s) = s {

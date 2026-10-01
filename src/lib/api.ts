@@ -74,6 +74,9 @@ export const api = {
   // sessions
   connect: (id: string, password?: string) => invoke<SchemaSummary>('connect', { id, password: password ?? null }),
   disconnect: (id: string) => invoke<void>('disconnect', { id }),
+  reconnect: (id: string) => invoke<SchemaSummary>('reconnect', { id }),
+  /** Health check; re-opens a dropped connection. Resolves to whether a transaction is open. */
+  pingConnection: (id: string) => invoke<boolean>('ping_connection', { id }),
   connectedIds: () => invoke<string[]>('connected_ids'),
   schemaSummary: (id: string) => invoke<SchemaSummary>('schema_summary', { id }),
   execute: (connectionId: string, sql: string, options?: ExecuteOptions) => invoke<ExecuteResponse>('execute', { connectionId, sql, options: options ?? null }),

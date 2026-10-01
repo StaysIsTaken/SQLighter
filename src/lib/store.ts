@@ -18,7 +18,7 @@ import type {
 } from '@shared/types'
 import { api, errorMessage } from './api'
 import { t } from './i18n'
-import { describeError } from './errors'
+import { describeError, isConnectionLost } from './errors'
 
 export interface SqlTab {
   id: string
@@ -50,6 +50,9 @@ export interface ConnState {
   error?: string
   inTransaction?: boolean
   autoCommit?: boolean
+  /** The connection to the server was lost and could not be re-established (error message). */
+  lost?: string
+  reconnecting?: boolean
 }
 
 export type Dialog =
@@ -97,6 +100,11 @@ interface State {
   connect: (id: string) => Promise<boolean>
   disconnect: (id: string) => Promise<void>
   refreshConnection: (id: string) => Promise<void>
+  reconnect: (id: string) => Promise<boolean>
+  /** Health check of an open connection; marks it as lost if the server cannot be reached. */
+  checkConnection: (id: string) => Promise<void>
+  /** Call with the error of a failed database call: checks the connection if it looks lost. */
+  reportError: (id: string, msg: string) => void
   loadObjects: (connectionId: string, schema: string, force?: boolean) => Promise<void>
   openSqlTab: (opts?: { connectionId?: string | null; sql?: string; title?: string; schema?: string; filePath?: string }) => string
   openTableTab: (connectionId: string, schema: string, name: string, kind: ObjectKind, view?: TableTab['view']) => void
@@ -115,6 +123,7 @@ interface State {
 }
 
 let toastId = 0
+const checking = new Set<string>()
 const TABS_KEY = 'sqlighter.tabs.v1'
 
 export function uid(): string {
@@ -214,6 +223,46 @@ export const useStore = create<State>((set, get) => ({
     } catch (e) {
       get().toast(errorMessage(e), 'error')
     }
+  },
+
+  reconnect: async (id) => {
+    const cur = get().conn[id]
+    if (!cur || cur.status !== 'connected') return get().connect(id)
+    const name = get().tree.connections.find((x) => x.id === id)?.name ?? ''
+    set((s) => ({ conn: { ...s.conn, [id]: { ...s.conn[id], reconnecting: true } } }))
+    try {
+      const summary = await api.reconnect(id)
+      set((s) => ({ conn: { ...s.conn, [id]: { ...s.conn[id], status: 'connected', summary, lost: undefined, reconnecting: false, inTransaction: false } } }))
+      if (summary.defaultSchema) get().loadObjects(id, summary.defaultSchema, true)
+      get().toast(t('Reconnected to "{name}"', { name }), 'success')
+      return true
+    } catch (e) {
+      const msg = errorMessage(e)
+      set((s) => ({ conn: { ...s.conn, [id]: { ...s.conn[id], lost: msg, reconnecting: false } } }))
+      get().toast(t('Connection "{name}" failed: {error}', { name, error: describeError(msg) }), 'error')
+      return false
+    }
+  },
+
+  checkConnection: async (id) => {
+    const cur = get().conn[id]
+    if (cur?.status !== 'connected' || cur.reconnecting || checking.has(id)) return
+    checking.add(id)
+    try {
+      const inTransaction = await api.pingConnection(id)
+      const wasLost = !!get().conn[id]?.lost
+      set((s) => (s.conn[id] ? { conn: { ...s.conn, [id]: { ...s.conn[id], lost: undefined, inTransaction } } } : {}))
+      if (wasLost) get().toast(t('Connection to "{name}" restored', { name: get().tree.connections.find((x) => x.id === id)?.name ?? '' }), 'success')
+    } catch (e) {
+      const msg = errorMessage(e)
+      set((s) => (s.conn[id] ? { conn: { ...s.conn, [id]: { ...s.conn[id], lost: msg, inTransaction: false } } } : {}))
+    } finally {
+      checking.delete(id)
+    }
+  },
+
+  reportError: (id, msg) => {
+    if (isConnectionLost(msg)) get().checkConnection(id)
   },
 
   loadObjects: async (connectionId, schema, force) => {

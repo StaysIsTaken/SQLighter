@@ -42,6 +42,29 @@ export function App() {
   const conn = s.tree.connections.find((c) => c.id === connId)
   const connState = connId ? s.conn[connId] : undefined
 
+  // Connection health: servers and firewalls drop idle connections. A periodic check keeps them
+  // alive, re-opens dropped ones in the background and shows a banner if the server is unreachable.
+  useEffect(() => {
+    let last = 0
+    const checkAll = () => {
+      last = Date.now()
+      const st = useStore.getState()
+      for (const [id, cs] of Object.entries(st.conn)) if (cs.status === 'connected') st.checkConnection(id)
+    }
+    const timer = setInterval(checkAll, 60_000)
+    // Coming back to the app after a while (sleep, VPN reconnect): check right away.
+    const onFocus = () => {
+      if (document.visibilityState === 'visible' && Date.now() - last > 15_000) checkAll()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
+    }
+  }, [])
+
   // Backend events
   useEffect(() => {
     const subs = [
@@ -204,7 +227,16 @@ export function App() {
               <DbIcon type={conn.type} size={14} />
               {conn.name}
             </span>
-            {connState?.status === 'connected' && (
+            {connState?.status === 'connected' && connState.lost && (
+              <span className="row" style={{ gap: 5, color: 'var(--warn)' }} title={connState.lost}>
+                <span className="dot" style={{ background: 'var(--warn)' }} />
+                {t('Connection lost')}
+                <button className="btn small ghost" disabled={connState.reconnecting} onClick={() => useStore.getState().reconnect(connId!)}>
+                  {connState.reconnecting ? <Loader2 size={12} className="spin" /> : null} {t('Reconnect')}
+                </button>
+              </span>
+            )}
+            {connState?.status === 'connected' && !connState.lost && (
               <>
                 <span className="row" style={{ gap: 5 }}>
                   <span className="dot" style={{ background: 'var(--ok)' }} />

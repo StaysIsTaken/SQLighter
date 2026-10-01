@@ -61,6 +61,7 @@ impl MsConn {
                     .with_context(|| format!("connection to {addr} timed out"))?
                     .with_context(|| format!("could not connect to {addr}"))?;
                 tcp.set_nodelay(true)?;
+                super::set_keepalive(&tcp);
                 Box::new(tcp)
             }
         };

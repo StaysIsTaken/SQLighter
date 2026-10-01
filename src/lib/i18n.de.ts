@@ -82,6 +82,8 @@ export const de: Record<string, string> = {
   'Connecting…': 'Verbinde…',
   Connection: 'Verbindung',
   'Connection "{name}" failed: {error}': 'Verbindung „{name}“ fehlgeschlagen: {error}',
+  'Connection lost': 'Verbindung getrennt',
+  'Connection to "{name}" restored': 'Verbindung zu „{name}“ wiederhergestellt',
   'Connection created': 'Verbindung angelegt',
   'Connection is read-only': 'Verbindung ist schreibgeschützt',
   'Connection saved': 'Verbindung gespeichert',
@@ -529,4 +531,7 @@ export const de: Record<string, string> = {
   Column: 'Spalte',
   Table: 'Tabelle',
   'Part of the primary key': 'Teil des Primärschlüssels',
+  Reconnect: 'Neu verbinden',
+  'Reconnected to "{name}"': 'Neu mit „{name}“ verbunden',
+  'The connection to the database was lost.': 'Die Verbindung zur Datenbank wurde getrennt.',
 }

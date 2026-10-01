@@ -6,6 +6,17 @@ export function cleanError(msg: string): string {
   return msg.replace(/(?:input\/output error|io error):\s*/gi, '').trim() || msg
 }
 
+/**
+ * Whether an error means the connection to the server is gone (idle timeout, server restart,
+ * firewall / NAT dropping the idle connection, VPN reconnect) rather than the statement failing.
+ * Mirrors `is_connection_lost` in src-tauri/src/db/mod.rs.
+ */
+export function isConnectionLost(msg: string): boolean {
+  return /connection to the server is closed|connection (is )?closed|closed the connection|terminating connection|connection reset|connection aborted|broken pipe|server has gone away|lost connection|unexpected (eof|end of file)|could not be re-established|not connected|os error (32|54|104|10053|10054)\)|ora-0311[34]|ora-03135|dpi-1080/i.test(
+    msg
+  )
+}
+
 export function errorHint(msg: string): string | null {
   const m = msg.toLowerCase()
   if (/tls is disabled for the remote host/.test(m))

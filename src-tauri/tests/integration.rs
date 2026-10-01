@@ -340,6 +340,54 @@ async fn mariadb() {
 
 /// MariaDB users created with `IDENTIFIED VIA ed25519` (common for root on some distributions).
 /// Requires SQLIGHTER_MY_ED25519_USER / _PASSWORD for such a user.
+/// The server (or a firewall) drops the editor connection, e.g. after a long idle time: the next
+/// run re-opens it instead of failing with "Connection to the server is closed".
+#[tokio::test]
+async fn mariadb_reconnects_after_lost_connection() {
+    if !enabled() {
+        return;
+    }
+    sqlighter_lib::tls::install_default_provider();
+    let (s, _) = Session::open(cfg(DbType::Mariadb), secrets(DbType::Mariadb), no_prompt(), true).await.unwrap();
+    let kill = || async {
+        let id = exec(&s, "SELECT CONNECTION_ID()").await.results[0].rows[0][0].clone();
+        let mut other = s.new_conn().await.unwrap();
+        other.run(&format!("KILL {id}"), 0).await.unwrap();
+        id
+    };
+    let run = |sql: &'static str, schema: Option<&'static str>| {
+        let s = &s;
+        async move { s.execute(sql, &ExecuteOptions { max_rows: None, confirmed: true, schema: schema.map(Into::into) }, &es()).await.unwrap() }
+    };
+
+    // Schema switch first: re-opened and repeated.
+    let id = kill().await;
+    let r = run("SELECT CONNECTION_ID()", Some("sqltest")).await;
+    assert!(r.results.iter().all(|x| x.error.is_none()), "{:?}", r.results);
+    assert_ne!(r.results.last().unwrap().rows[0][0], id);
+
+    // Read-only statement without a schema switch: repeated on a new connection.
+    kill().await;
+    let r = run("SELECT 1", None).await;
+    assert!(r.results[0].error.is_none(), "{:?}", r.results[0].error);
+
+    // Lost inside a transaction: reported once, never silently run outside the transaction.
+    run("BEGIN", None).await;
+    assert!(s.in_tx.load(std::sync::atomic::Ordering::SeqCst));
+    kill().await;
+    assert!(!s.health().await.unwrap());
+    let r = run("SELECT 1", None).await;
+    assert!(r.results[0].error.as_deref().unwrap_or("").contains("transaction"), "{:?}", r.results[0].error);
+    let r = run("SELECT 1", None).await;
+    assert!(r.results[0].error.is_none(), "{:?}", r.results[0].error);
+
+    // Background health check re-opens a dropped connection.
+    kill().await;
+    assert!(!s.health().await.unwrap());
+    exec(&s, "SELECT 1").await;
+    s.close().await;
+}
+
 #[tokio::test]
 async fn mariadb_ed25519_auth() {
     let Ok(user) = std::env::var("SQLIGHTER_MY_ED25519_USER") else { return };

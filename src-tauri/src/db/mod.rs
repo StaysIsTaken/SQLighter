@@ -110,6 +110,22 @@ impl Conn {
         }
     }
 
+    /// Cheap round trip that tells whether the server still answers on this connection.
+    pub async fn ping(&mut self) -> Result<()> {
+        match self {
+            Conn::Pg(c) => c.ping().await,
+            Conn::My(c) => c.ping().await,
+            Conn::Lite(_) => Ok(()),
+            Conn::Ms(c) => c.run("SELECT 1", 1).await.map(|_| ()),
+            #[cfg(feature = "oracle")]
+            Conn::Ora(c) => {
+                let c = c.conn.clone();
+                tokio::task::spawn_blocking(move || c.ping()).await??;
+                Ok(())
+            }
+        }
+    }
+
     pub async fn run(&mut self, sql: &str, max_rows: usize) -> Result<Vec<QueryResult>> {
         match self {
             Conn::Pg(c) => c.run(sql, max_rows).await,
@@ -220,6 +236,49 @@ impl Conn {
     }
 }
 
+/// Whether an error means the connection itself is gone (server restart, idle timeout, a firewall
+/// or NAT dropping the idle TCP connection, VPN reconnect) rather than the statement failing.
+pub fn is_connection_lost(e: &anyhow::Error) -> bool {
+    let m = crate::error::chain_message(e).to_ascii_lowercase();
+    [
+        "connection to the server is closed",
+        "connection closed",
+        "closed the connection",
+        "terminating connection",
+        "connection is closed",
+        "connection reset",
+        "connection aborted",
+        "broken pipe",
+        "server has gone away",
+        "lost connection",
+        "unexpected eof",
+        "unexpected end of file",
+        "not connected",
+        "os error 32)",
+        "os error 54)",
+        "os error 104)",
+        "os error 10053)",
+        "os error 10054)",
+        "ora-03113",
+        "ora-03114",
+        "ora-03135",
+        "dpi-1080",
+    ]
+    .iter()
+    .any(|p| m.contains(p))
+}
+
+/// Enables TCP keepalive so that firewalls / NAT devices do not silently drop idle connections,
+/// and so that a dead peer is noticed.
+pub fn set_keepalive(s: &tokio::net::TcpStream) {
+    let ka = socket2::TcpKeepalive::new().with_time(std::time::Duration::from_secs(60));
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows", target_os = "freebsd"))]
+    let ka = ka.with_interval(std::time::Duration::from_secs(15));
+    if let Err(e) = socket2::SockRef::from(s).set_tcp_keepalive(&ka) {
+        log::debug!("could not enable TCP keepalive: {e}");
+    }
+}
+
 /// Integers beyond JavaScript's safe range are transported as strings.
 pub fn num_i64(s: &str) -> Value {
     match s.trim().parse::<i64>() {
@@ -266,5 +325,21 @@ pub fn cell_i64(v: &Value) -> Option<i64> {
         Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
         Value::String(s) => s.trim().parse::<f64>().ok().map(|f| f as i64),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_lost_connections() {
+        let lost = |m: &str| is_connection_lost(&anyhow::anyhow!(m.to_string()));
+        assert!(lost("Input/output error: Input/output error: Driver error: `Connection to the server is closed.'"));
+        assert!(lost("Input/output error: Connection reset by peer (os error 104)"));
+        assert!(lost("MySQL server has gone away"));
+        assert!(lost("ORA-03113: end-of-file on communication channel"));
+        assert!(!lost("Table 'jobrouter.accounting' doesn't exist"));
+        assert!(!lost("ERROR: syntax error at or near \"x\""));
     }
 }

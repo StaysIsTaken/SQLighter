@@ -121,6 +121,7 @@ impl PgConn {
                     .with_context(|| format!("connection to {host}:{port} timed out"))?
                     .with_context(|| format!("could not connect to {host}:{port}"))?;
                 s.set_nodelay(true)?;
+                super::set_keepalive(&s);
                 match tc {
                     Some(tc) => {
                         let mut mk = MakeRustlsConnect::new((**tc).clone());
@@ -152,6 +153,11 @@ impl PgConn {
 
     pub fn is_closed(&self) -> bool {
         self.client.is_closed()
+    }
+
+    pub async fn ping(&mut self) -> Result<()> {
+        self.client.simple_query("SELECT 1").await.map_err(pg_err)?;
+        Ok(())
     }
 
     /// Executes one statement. Result sets are fetched in text format, typed via a prepare step.

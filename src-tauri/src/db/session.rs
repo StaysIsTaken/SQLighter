@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Result};
 use tokio::sync::{Mutex, MutexGuard, Notify};
 
-use super::{Canceller, Conn};
+use super::{is_connection_lost, Canceller, Conn};
 use crate::model::*;
 use crate::sql;
 use crate::ssh::{PromptFn, SshTunnel};
@@ -20,6 +20,12 @@ pub struct Session {
     main: Mutex<Option<Conn>>,
     meta: Mutex<Option<Conn>>,
     canceller: StdMutex<Option<Canceller>>,
+    /// When `main` / `meta` were last used: idle connections are pinged before reuse, because a
+    /// server timeout or a firewall may have dropped them in the meantime.
+    main_used: StdMutex<Instant>,
+    meta_used: StdMutex<Instant>,
+    /// The connection was lost while a transaction was open. Reported once to the user.
+    tx_lost: AtomicBool,
     abort: Notify,
     running: AtomicBool,
     pub in_tx: AtomicBool,
@@ -56,6 +62,9 @@ impl Session {
             main: Mutex::new(Some(main)),
             meta: Mutex::new(None),
             canceller: StdMutex::new(Some(canceller)),
+            main_used: StdMutex::new(Instant::now()),
+            meta_used: StdMutex::new(Instant::now()),
+            tx_lost: AtomicBool::new(false),
             abort: Notify::new(),
             running: AtomicBool::new(false),
             in_tx: AtomicBool::new(false),
@@ -77,23 +86,61 @@ impl Session {
 
     pub async fn meta(&self) -> Result<MutexGuard<'_, Option<Conn>>> {
         let mut g = self.meta.lock().await;
-        if g.as_ref().is_none_or(|c| c.is_broken()) {
-            *g = Some(self.new_conn().await?);
+        if !alive(&mut g, &self.meta_used, false).await {
+            *g = Some(self.new_conn().await.map_err(reconnect_failed)?);
         }
+        *self.meta_used.lock().unwrap() = Instant::now();
         Ok(g)
     }
 
     async fn main(&self) -> Result<MutexGuard<'_, Option<Conn>>> {
         let mut g = self.main.lock().await;
-        if g.as_ref().is_none_or(|c| c.is_broken()) {
-            if self.in_tx.swap(false, Ordering::SeqCst) {
-                log::warn!("connection lost inside a transaction; uncommitted changes are gone");
-            }
-            let c = self.new_conn().await?;
-            *self.canceller.lock().unwrap() = Some(c.canceller(&self.cfg));
-            *g = Some(c);
+        if !alive(&mut g, &self.main_used, false).await {
+            self.reopen_main(&mut g).await?;
         }
+        *self.main_used.lock().unwrap() = Instant::now();
         Ok(g)
+    }
+
+    /// Replaces the (lost) editor connection with a fresh one.
+    async fn reopen_main(&self, g: &mut MutexGuard<'_, Option<Conn>>) -> Result<()> {
+        **g = None;
+        if self.in_tx.swap(false, Ordering::SeqCst) {
+            log::warn!("connection lost inside a transaction; uncommitted changes are gone");
+            self.tx_lost.store(true, Ordering::SeqCst);
+        }
+        let c = self.new_conn().await.map_err(reconnect_failed)?;
+        *self.canceller.lock().unwrap() = Some(c.canceller(&self.cfg));
+        **g = Some(c);
+        Ok(())
+    }
+
+    /// Background health check: makes sure the editor connection still works and transparently
+    /// re-opens it if the server dropped it. Fails only if the server cannot be reached.
+    pub async fn health(&self) -> Result<bool> {
+        // While a statement runs, the connection is evidently in use.
+        if !self.running.load(Ordering::SeqCst) {
+            let mut g = self.main.lock().await;
+            if !alive(&mut g, &self.main_used, true).await {
+                self.reopen_main(&mut g).await?;
+            }
+            *self.main_used.lock().unwrap() = Instant::now();
+        }
+        if let Ok(mut g) = self.meta.try_lock() {
+            if g.is_some() && !alive(&mut g, &self.meta_used, true).await {
+                // Re-opened on next use.
+                *g = None;
+            }
+        }
+        Ok(self.in_tx.load(Ordering::SeqCst))
+    }
+
+    /// Reports (once) that an open transaction was lost together with the connection.
+    fn take_tx_lost(&self) -> Result<()> {
+        if self.tx_lost.swap(false, Ordering::SeqCst) {
+            bail!("{TX_LOST}");
+        }
+        Ok(())
     }
 
     /// Checks statements against read-only / production / destructive rules.
@@ -134,16 +181,45 @@ impl Session {
         let max_rows = opts.max_rows.unwrap_or(es.max_rows).max(1);
         let mut g = self.main().await?;
         let mut results = Vec::new();
-        if let (Some(switch), Some(conn)) = (opts.schema.as_deref().and_then(|s| use_schema_sql(self.dialect(), s)), g.as_mut()) {
+        if let Err(e) = self.take_tx_lost() {
+            // Running the statements now would silently execute them outside the transaction the
+            // user believes is still open.
+            results.push(QueryResult::failed(stmts.first().map(String::as_str).unwrap_or(""), e.to_string()));
+            return Ok(ExecuteResponse { results, needs_confirmation: None, in_transaction: false });
+        }
+        let switch = opts.schema.as_deref().and_then(|s| use_schema_sql(self.dialect(), s));
+        if let Some(switch) = &switch {
             // Issued on every run: several editor tabs share this connection and the user may
             // also have switched manually with USE / SET search_path.
-            if let Err(e) = conn.run(&switch, 1).await {
-                results.push(QueryResult::failed(&switch, crate::error::chain_message(&e)));
+            let mut r = match g.as_mut() {
+                Some(conn) => conn.run(switch, 1).await.map(|_| ()),
+                None => Ok(()),
+            };
+            if let Err(e) = &r {
+                // The switch is the first thing sent: if the connection turns out to be dead, it
+                // can safely be re-opened and the switch repeated.
+                if is_connection_lost(e) && !self.in_tx.load(Ordering::SeqCst) {
+                    log::info!("connection lost, reconnecting: {}", crate::error::chain_message(e));
+                    r = match self.reopen_main(&mut g).await {
+                        Ok(()) => g.as_mut().unwrap().run(switch, 1).await.map(|_| ()),
+                        Err(e) => Err(e),
+                    };
+                }
+            }
+            if let Err(e) = r {
+                let mut msg = crate::error::chain_message(&e);
+                if is_connection_lost(&e) {
+                    *g = None;
+                    msg = lost_message(msg, self.in_tx.swap(false, Ordering::SeqCst));
+                }
+                results.push(QueryResult::failed(switch, msg));
                 return Ok(ExecuteResponse { results, needs_confirmation: None, in_transaction: self.in_tx.load(Ordering::SeqCst) });
             }
         }
         self.running.store(true, Ordering::SeqCst);
-        for stmt in &stmts {
+        let mut retried = false;
+        let mut i = 0;
+        while let Some(stmt) = stmts.get(i) {
             let conn = match g.as_mut() {
                 Some(c) => c,
                 None => break,
@@ -151,7 +227,12 @@ impl Session {
             let kw = sql::leading_keyword(stmt);
             if !self.auto_commit.load(Ordering::SeqCst) && !self.in_tx.load(Ordering::SeqCst) && !is_tx_control(stmt) {
                 if let Err(e) = conn.begin().await {
-                    results.push(QueryResult::failed(stmt, crate::error::chain_message(&e)));
+                    let mut msg = crate::error::chain_message(&e);
+                    if is_connection_lost(&e) {
+                        *g = None;
+                        msg = lost_message(msg, false);
+                    }
+                    results.push(QueryResult::failed(stmt, msg));
                     break;
                 }
                 self.in_tx.store(true, Ordering::SeqCst);
@@ -179,13 +260,38 @@ impl Session {
                         "COMMIT" | "ROLLBACK" | "END" => self.in_tx.store(false, Ordering::SeqCst),
                         _ => {}
                     }
+                    i += 1;
                 }
                 Err(e) => {
-                    let msg = crate::error::chain_message(&e);
+                    let lost = is_connection_lost(&e);
+                    // A dead connection noticed by the first statement: a read-only statement
+                    // outside a transaction is safe to repeat on a new connection.
+                    if lost && i == 0 && !retried && !self.in_tx.load(Ordering::SeqCst) && !sql::analyze(stmt).modifies {
+                        log::info!("connection lost, reconnecting: {}", crate::error::chain_message(&e));
+                        retried = true;
+                        if self.reopen_main(&mut g).await.is_ok() {
+                            let c = g.as_mut().unwrap();
+                            let switched = match &switch {
+                                Some(sw) => c.run(sw, 1).await.is_ok(),
+                                None => true,
+                            };
+                            if switched {
+                                continue;
+                            }
+                        }
+                    }
+                    let mut msg = crate::error::chain_message(&e);
+                    if lost {
+                        // Whether the statement reached the server is unknown, so it is not
+                        // repeated. The next run opens a new connection.
+                        msg = lost_message(msg, self.in_tx.swap(false, Ordering::SeqCst));
+                    }
                     let mut r = QueryResult::failed(stmt, msg.clone());
                     r.duration_ms = elapsed;
                     results.push(r);
-                    if msg == "Query cancelled" || msg.starts_with("Query timed out") {
+                    if lost {
+                        *g = None;
+                    } else if msg == "Query cancelled" || msg.starts_with("Query timed out") {
                         // The protocol state is unknown after dropping the future: reconnect lazily.
                         if matches!(*self.canceller.lock().unwrap(), Some(Canceller::Abort)) {
                             *g = None;
@@ -197,6 +303,7 @@ impl Session {
             }
         }
         self.running.store(false, Ordering::SeqCst);
+        *self.main_used.lock().unwrap() = Instant::now();
         Ok(ExecuteResponse { results, needs_confirmation: None, in_transaction: self.in_tx.load(Ordering::SeqCst) })
     }
 
@@ -214,6 +321,7 @@ impl Session {
 
     pub async fn commit(&self) -> Result<()> {
         let mut g = self.main().await?;
+        self.take_tx_lost()?;
         if let Some(c) = g.as_mut() {
             c.commit().await?;
         }
@@ -223,6 +331,8 @@ impl Session {
 
     pub async fn rollback(&self) -> Result<()> {
         let mut g = self.main().await?;
+        // Lost with the connection: already rolled back by the server.
+        self.tx_lost.store(false, Ordering::SeqCst);
         if let Some(c) = g.as_mut() {
             c.rollback().await?;
         }
@@ -311,6 +421,46 @@ impl Session {
 
     pub fn secrets(&self) -> &ConnectionSecrets {
         &self.secrets
+    }
+}
+
+/// How long a connection may sit idle before it is pinged prior to reuse.
+const IDLE_PING: Duration = Duration::from_secs(30);
+
+const TX_LOST: &str = "The connection to the server was lost while a transaction was open. The server rolled back the uncommitted changes. The connection has been re-established - run the statements again.";
+
+/// Checks the connection in a slot: missing, closed, or (idle for a while or `force`) and no
+/// longer answering.
+async fn alive(g: &mut MutexGuard<'_, Option<Conn>>, used: &StdMutex<Instant>, force: bool) -> bool {
+    let Some(c) = g.as_mut() else { return false };
+    if c.is_broken() {
+        return false;
+    }
+    if !force && used.lock().unwrap().elapsed() < IDLE_PING {
+        return true;
+    }
+    match tokio::time::timeout(Duration::from_secs(10), c.ping()).await {
+        Ok(Ok(())) => true,
+        Ok(Err(e)) => {
+            log::info!("idle connection is gone, reconnecting: {}", crate::error::chain_message(&e));
+            false
+        }
+        Err(_) => {
+            log::info!("idle connection does not answer, reconnecting");
+            false
+        }
+    }
+}
+
+fn reconnect_failed(e: anyhow::Error) -> anyhow::Error {
+    e.context("Connection to the server was lost and could not be re-established")
+}
+
+fn lost_message(msg: String, in_tx: bool) -> String {
+    if in_tx {
+        format!("{msg}\n\nThe connection to the server was lost while a transaction was open. The server rolled back the uncommitted changes. It is re-established automatically on the next run.")
+    } else {
+        format!("{msg}\n\nThe connection to the server was lost. It is re-established automatically on the next run.")
     }
 }
 

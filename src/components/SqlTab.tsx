@@ -26,6 +26,7 @@ import { api, errorMessage } from '@/lib/api'
 import { formatCount, formatDuration } from '@/lib/format'
 import { t } from '@/lib/i18n'
 import { editors, useStore, type SqlTab as SqlTabT } from '@/lib/store'
+import { ConnectionLostBanner } from './ConnectionBanner'
 import { Editor } from './Editor'
 import { ResultGrid, type SourceColumn } from './ResultGrid'
 import { HSplitter, usePersistentState } from './ui'
@@ -115,7 +116,7 @@ export function SqlTab({ tab, visible }: { tab: SqlTabT; visible: boolean }) {
   const tree = useStore((s) => s.tree)
   const connState = useStore((s) => (tab.connectionId ? s.conn[tab.connectionId] : undefined))
   const settings = useStore((s) => s.settings)
-  const { updateTab, connect, setDialog, toast, setTxState } = useStore.getState()
+  const { updateTab, connect, setDialog, toast, setTxState, reportError } = useStore.getState()
   const conn = tree.connections.find((c) => c.id === tab.connectionId)
   const dialect: Dialect = conn ? dialectOf(conn.type) : 'postgres'
   const connected = connState?.status === 'connected'
@@ -158,13 +159,18 @@ export function SqlTab({ tab, visible }: { tab: SqlTabT; visible: boolean }) {
       }
       setResults(res.results)
       setTxState(tab.connectionId, res.inTransaction)
+      const failed = res.results.find((r) => r.error)
+      if (failed?.error) reportError(tab.connectionId, failed.error)
+      else if (useStore.getState().conn[tab.connectionId]?.lost) useStore.getState().checkConnection(tab.connectionId)
       const firstErr = res.results.findIndex((r) => r.error)
       const lastSet = res.results.map((r, i) => (r.isResultSet ? i : -1)).filter((i) => i >= 0)
       setActiveResult(firstErr >= 0 ? firstErr : lastSet.length ? lastSet[0] : Math.max(0, res.results.length - 1))
       setFilter('')
     } catch (e) {
-      setResults([{ statement: sql, columns: [], rows: [], truncated: false, durationMs: 0, error: errorMessage(e), isResultSet: false }])
+      const msg = errorMessage(e)
+      setResults([{ statement: sql, columns: [], rows: [], truncated: false, durationMs: 0, error: msg, isResultSet: false }])
       setActiveResult(0)
+      reportError(tab.connectionId, msg)
     } finally {
       setRunning(false)
     }
@@ -381,6 +387,7 @@ export function SqlTab({ tab, visible }: { tab: SqlTabT; visible: boolean }) {
           <Sparkles size={14} /> {t('Ask AI')}
         </button>
       </div>
+      <ConnectionLostBanner connectionId={tab.connectionId} />
       <Editor
         value={tab.sql}
         onChange={(v) => updateTab(tab.id, { sql: v, dirty: !!tab.filePath })}

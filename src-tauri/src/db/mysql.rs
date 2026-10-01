@@ -37,6 +37,8 @@ impl MyConn {
             .stmt_cache_size(0)
             .conn_ttl(None)
             .wait_timeout(Some(28_800))
+            // Keeps idle connections alive through firewalls / NAT and detects a dead peer.
+            .tcp_keepalive(Some(Duration::from_secs(60)))
             .client_found_rows(false);
         match cfg.tls.mode {
             TlsMode::Disabled => {}
@@ -68,6 +70,11 @@ impl MyConn {
 
     pub fn id(&self) -> u32 {
         self.conn.id()
+    }
+
+    pub async fn ping(&mut self) -> Result<()> {
+        self.conn.ping().await?;
+        Ok(())
     }
 
     /// Runs exactly one statement through the binary protocol. A prepared statement cannot contain

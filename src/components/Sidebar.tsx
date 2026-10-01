@@ -202,6 +202,7 @@ export function Sidebar() {
       connected
         ? { label: t('Disconnect'), icon: <Unplug size={14} />, onClick: () => st.disconnect(c.id) }
         : { label: t('Connect'), icon: <Plug size={14} />, onClick: () => openConnection(c) },
+      ...(connected ? [{ label: t('Reconnect'), icon: <RefreshCw size={14} />, onClick: () => st.reconnect(c.id) }] : []),
       { label: t('New SQL editor'), icon: <FileCode2 size={14} />, shortcut: 'Ctrl+T', onClick: () => st.openSqlTab({ connectionId: c.id }) },
       { label: t('Refresh'), icon: <RefreshCw size={14} />, disabled: !connected, onClick: () => st.refreshConnection(c.id) },
       { separator: true },
@@ -477,7 +478,8 @@ export function Sidebar() {
             <FileCode2 size={13} />
           </button>
         </span>
-        {cs?.status === 'connected' && <span className="dot" style={{ background: 'var(--ok)' }} title={t('Connected')} />}
+        {cs?.status === 'connected' && !cs.lost && <span className="dot" style={{ background: 'var(--ok)' }} title={t('Connected')} />}
+        {cs?.status === 'connected' && cs.lost && <span className="dot" style={{ background: 'var(--warn)' }} title={t('Connection lost') + ' – ' + cs.lost} />}
         {cs?.status === 'error' && <span className="dot" style={{ background: 'var(--danger)' }} title={cs.error} />}
       </div>
     )

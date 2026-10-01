@@ -84,6 +84,8 @@ pub fn run() {
             commands::connect,
             commands::disconnect,
             commands::connected_ids,
+            commands::reconnect,
+            commands::ping_connection,
             commands::schema_summary,
             commands::execute,
             commands::cancel_query,

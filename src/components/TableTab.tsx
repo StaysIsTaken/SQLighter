@@ -10,6 +10,7 @@ import { t } from '@/lib/i18n'
 import { useStore, type TableTab as TableTabT } from '@/lib/store'
 import { Editor } from './Editor'
 import { ResultGrid } from './ResultGrid'
+import { ConnectionLostBanner } from './ConnectionBanner'
 
 export function TableTab({ tab, visible }: { tab: TableTabT; visible: boolean }) {
   const conn = useStore((s) => s.tree.connections.find((c) => c.id === tab.connectionId))
@@ -24,7 +25,9 @@ export function TableTab({ tab, visible }: { tab: TableTabT; visible: boolean })
       setInfo(await api.describeTable(tab.connectionId, tab.schema, tab.name, tab.objectKind))
       setInfoError(null)
     } catch (e) {
-      setInfoError(errorMessage(e))
+      const msg = errorMessage(e)
+      setInfoError(msg)
+      useStore.getState().reportError(tab.connectionId, msg)
     }
   }, [tab.connectionId, tab.schema, tab.name, tab.objectKind])
 
@@ -47,6 +50,7 @@ export function TableTab({ tab, visible }: { tab: TableTabT; visible: boolean })
         </span>
         {info?.rowEstimate != null && <span className="badge">~{formatCount(info.rowEstimate)} {t('rows')}</span>}
       </div>
+      <ConnectionLostBanner connectionId={tab.connectionId} />
       {infoError && (
         <div className="result-message">
           <div className="error-box">{infoError}</div>
@@ -95,7 +99,9 @@ function DataView({ tab, info, dialect, readOnly }: { tab: TableTabT; info: Tabl
       setNewRows([])
       setDeleted(new Set())
     } catch (e) {
-      setError(errorMessage(e))
+      const msg = errorMessage(e)
+      setError(msg)
+      useStore.getState().reportError(tab.connectionId, msg)
     } finally {
       setLoading(false)
     }
